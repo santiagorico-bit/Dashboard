@@ -69,3 +69,20 @@ test("un alta puede arrastrar las dos incidencias a la vez", () => {
   assert.equal(isSignatureIncidence(ambas), true);
   assert.equal(isPaymentIncidence(ambas), true);
 });
+
+test("reconoce el término que usa el club: contrato no formalizado", () => {
+  const estados = [
+    "Contrato no formalizado", "No formalizado", "No formalizada",
+    "Sin formalizar", "Pendiente de formalizar", "Falta formalizacion",
+    "Formalización pendiente",
+  ];
+  for (const status of estados) {
+    assert.equal(isSignatureIncidence({ status }), true, `${status} debería ser incidencia de firma`);
+  }
+});
+
+test("un contrato formalizado no salta el aviso", () => {
+  for (const status of ["Formalizado", "Contrato formalizado", "Activo"]) {
+    assert.equal(isSignatureIncidence({ status }), false, `${status} no debería avisar`);
+  }
+});

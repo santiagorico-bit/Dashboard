@@ -68,11 +68,12 @@
 
         <article class="panel incidences-panel">
           <div class="panel-head"><div><p class="eyebrow">INCIDENCIAS</p><h2>Altas y bajas que requieren revisión</h2></div><span class="target-period">Mes en curso</span></div>
-          <div class="incidence-summary"><div><span>Altas incompletas</span><strong id="incidence-incomplete-total">—</strong></div><div><span>Bajas · período actual completo</span><strong id="incidence-full-period-total">—</strong></div><div><span>Incidencias de pago</span><strong id="incidence-payment-total">—</strong></div><div><span>Altas sin firmar</span><strong id="incidence-signature-total">—</strong></div></div>
+          <div class="contract-alert" id="contract-alert" hidden></div>
+          <div class="incidence-summary"><div><span>Altas incompletas</span><strong id="incidence-incomplete-total">—</strong></div><div><span>Bajas · período actual completo</span><strong id="incidence-full-period-total">—</strong></div><div><span>Incidencias de pago</span><strong id="incidence-payment-total">—</strong></div><div><span>Contratos no formalizados</span><strong id="incidence-signature-total">—</strong></div></div>
           <div id="incidence-cards" class="incidence-cards"></div>
           <p class="incidence-note">Altas incompletas: altas del mes con alertas abiertas de incorporación. Las personas con varias alertas cuentan una sola vez.</p>
           <p class="incidence-note">Incidencias de pago: socios activos con el cobro pendiente o devuelto. Siguen contando como activos —entran al club—, pero tienen un recibo por resolver. Cada persona cuenta una sola vez.</p>
-          <p class="incidence-note">Altas sin firmar: altas del mes con el contrato pendiente de firma. Cuentan como alta desde el primer día, pero pueden quedar invalidadas si nadie hace el seguimiento.</p>
+          <p class="incidence-note">Contratos no formalizados: altas del mes con el contrato pendiente de firma o formalización. Si Resamania ya muestra a la persona como cliente, cuenta como alta —y aquí se cuenta igual—, pero puede quedar invalidada si nadie hace el seguimiento.</p>
         </article>
 
         <article class="panel watch-panel">

@@ -50,6 +50,33 @@ function stateDetail(states) {
     .join(" · ");
 }
 
+/**
+ * Recuadro de aviso de contratos no formalizados.
+ *
+ * Estas altas ya cuentan: Resamania muestra a la persona como cliente y aquí se
+ * suma igual. El riesgo es que decaigan por falta de seguimiento, así que el
+ * aviso va aparte en vez de perderse como una línea más de cada tarjeta.
+ */
+function renderContractAlert(incidences) {
+  const box = document.querySelector("#contract-alert");
+  const clubs = (incidences?.clubs ?? []).filter((club) => (club.signatureIncidences ?? 0) > 0);
+  const total = incidences?.totals?.signatureIncidences ?? 0;
+
+  if (total === 0 || clubs.length === 0) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+
+  const detalle = clubs
+    .sort((a, b) => b.signatureIncidences - a.signatureIncidences)
+    .map((club) => `<li><span>${club.name}</span><strong>${value(club.signatureIncidences)}</strong><small>${stateDetail(club.signatureIncidenceStates)}</small></li>`)
+    .join("");
+
+  box.hidden = false;
+  box.innerHTML = `<div class="contract-alert-head"><span class="contract-alert-icon">!</span><div><strong>${value(total)} ${total === 1 ? "contrato sin formalizar" : "contratos sin formalizar"}</strong><p>Cuentan como alta —Resamania ya muestra a estas personas como clientes—, pero pueden decaer si nadie completa la firma. Revísalos antes del cierre de mes.</p></div></div><ul class="contract-alert-list">${detalle}</ul>`;
+}
+
 function objectiveMetric(label, actual, target, percentage, kind, detail = "") {
   const width = percentage === null ? 0 : Math.max(0, Math.min(100, percentage));
   return `<div class="objective-metric ${kind}"><span class="objective-label">${label}</span><div class="objective-values"><strong>${value(actual)}</strong><span>de ${value(target)}</span></div>${detail ? `<small>${detail}</small>` : ""}<span class="objective-percent">${percentage === null ? "—" : `${fmtNumber.format(percentage)}%`}</span><div class="objective-track"><i style="width:${width}%"></i></div></div>`;
@@ -200,7 +227,8 @@ function render(data) {
   document.querySelector("#incidence-full-period-total").textContent = value(data.incidences?.totals?.fullPeriodCancellations);
   document.querySelector("#incidence-payment-total").textContent = value(data.incidences?.totals?.paymentIncidences);
   document.querySelector("#incidence-signature-total").textContent = value(data.incidences?.totals?.signatureIncidences);
-  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div><div class="incidence-payment"><dt>Incidencias de pago</dt><dd>${value(club.paymentIncidences)}</dd><small>${stateDetail(club.paymentIncidenceStates)}</small></div><div class="incidence-signature"><dt>Altas sin firmar</dt><dd>${value(club.signatureIncidences)}</dd><small>${stateDetail(club.signatureIncidenceStates)}</small></div></dl></section>`).join("");
+  renderContractAlert(data.incidences);
+  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div><div class="incidence-payment"><dt>Incidencias de pago</dt><dd>${value(club.paymentIncidences)}</dd><small>${stateDetail(club.paymentIncidenceStates)}</small></div><div class="incidence-signature"><dt>Contratos no formalizados</dt><dd>${value(club.signatureIncidences)}</dd><small>${stateDetail(club.signatureIncidenceStates)}</small></div></dl></section>`).join("");
   document.querySelector("#watch-period").textContent = data.watchData?.period?.label ?? "Pendiente";
   document.querySelector("#watch-cards").innerHTML = (data.watchData?.clubs ?? []).map((club) => `<section class="watch-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><strong>${value(club.count)}</strong></section>`).join("");
 
