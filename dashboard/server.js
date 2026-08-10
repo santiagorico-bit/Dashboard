@@ -360,6 +360,7 @@ async function buildDashboardData() {
       totals.automaticReturnFeeOnly += row.incidences.automaticReturnFeeOnly ?? 0;
       totals.pendingCancellations += row.incidences.pendingCancellations ?? 0;
       totals.paymentIncidences += row.incidences.paymentIncidences ?? 0;
+      totals.signatureIncidences += row.incidences.signatureIncidences ?? 0;
       return totals;
     },
     {
@@ -369,6 +370,7 @@ async function buildDashboardData() {
       automaticReturnFeeOnly: 0,
       pendingCancellations: 0,
       paymentIncidences: 0,
+      signatureIncidences: 0,
     },
   );
 

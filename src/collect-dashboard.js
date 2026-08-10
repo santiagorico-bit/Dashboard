@@ -8,7 +8,7 @@ import {
   contactOf, hasPriorFormulaChange, isCdd, isEligibleCancellation, isFormulaChange,
   isDayPassSession, isEligibleActiveMember, isPreEligibleMembership, isSession, isTieSession,
   isShortNoticeFullPeriodCancellation, isShortPass, isValidInvoice, isVip, isWebOffer,
-  normalizeState, normalizeText, paymentIssueLabel, productCode,
+  normalizeState, normalizeText, paymentIssueLabel, productCode, signatureIssueLabel,
 } from "./dashboard-domain.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -186,6 +186,17 @@ async function collect([slug, name, id]) {
     const membershipSubscriptions = preEligibleMembershipSubscriptions.filter(
       (_item, index) => !fullPriorFormulaFlags[index],
     );
+    // Un alta sin firmar cuenta como alta —la persona ya es socia—, pero puede
+    // quedar invalidada si nadie la persigue, así que se anota aparte.
+    const signatureIssueContacts = new Set();
+    const signatureIssueStates = {};
+    for (const item of membershipSubscriptions) {
+      const label = signatureIssueLabel(item);
+      if (!label) continue;
+      const contact = contactOf(item);
+      if (contact) signatureIssueContacts.add(contact);
+      signatureIssueStates[label] = (signatureIssueStates[label] ?? 0) + 1;
+    }
     const sessionSubscriptions = subscriptions.filter(isSession);
     const activeMemberSubscriptions = [];
     for (let pageNumber = 1; pageNumber <= 50; pageNumber += 1) {
@@ -738,6 +749,8 @@ async function collect([slug, name, id]) {
           nextPendingCancellationDate,
           paymentIncidences: paymentIssueContacts.size,
           paymentIncidenceStates: paymentIssueStates,
+          signatureIncidences: signatureIssueContacts.size,
+          signatureIncidenceStates: signatureIssueStates,
         },
         salesFunnel: {
           visits: visitContactIds.size,

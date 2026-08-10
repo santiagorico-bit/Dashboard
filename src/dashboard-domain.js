@@ -92,6 +92,37 @@ export function paymentIssueLabel(item) {
 
 export const isPaymentIncidence = (item) => paymentIssueLabel(item) !== null;
 
+/**
+ * Estados de un alta que aún no está formalizada.
+ *
+ * El alta cuenta desde el primer día —la persona ya es socia—, pero sin firma
+ * puede quedar invalidada más adelante, así que necesita seguimiento. Igual que
+ * con los cobros: se anota, no se descuenta.
+ */
+export const SIGNATURE_ISSUE_PATTERNS = [
+  /(en\s*espera|pendiente)\s*(de\s*)?firma/,
+  /firma\s*pendiente/,
+  /sin\s*firmar/,
+  /no\s*firmad[oa]/,
+  /falta\s*(la\s*)?firma/,
+  /(pending|awaiting)[\s_-]*signature/,
+  /signature[\s_-]*(pending|missing|required)/,
+  /unsigned/,
+  /not[\s_-]*signed/,
+];
+
+/** Devuelve el estado original que ha disparado la incidencia, o null. */
+export function signatureIssueLabel(item) {
+  for (const raw of [item?.status, item?.state, item?.contractState, item?.signatureStatus]) {
+    const value = normalizeText(raw);
+    if (!value) continue;
+    if (SIGNATURE_ISSUE_PATTERNS.some((pattern) => pattern.test(value))) return String(raw);
+  }
+  return null;
+}
+
+export const isSignatureIncidence = (item) => signatureIssueLabel(item) !== null;
+
 export function isPreEligibleMembership(item, { from, to, enabledCodes }) {
   const validFrom = item?.validFrom?.slice(0, 10);
   return Boolean(validFrom && validFrom >= from && validFrom <= to) &&

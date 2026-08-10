@@ -19,7 +19,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isCdd, isDayPassSession, isFormulaChange, isSession, isShortPass, isTieSession,
-  isPaymentIncidence, isVip, isWebOffer, normalizeState, offerLabel, productCode,
+  isPaymentIncidence, isSignatureIncidence, isVip, isWebOffer, normalizeState, offerLabel,
+  productCode,
 } from "./dashboard-domain.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -111,10 +112,11 @@ if (unrecognisedStates.length === 0) {
 } else {
   console.log("  Un estado no reconocido se trata como si no fuese cancelado, así que");
   console.log("  cuenta en altas, bajas o facturación. Revisa si alguno debería excluirse.");
-  console.log("  Los marcados [pago] sí están cubiertos: cuentan como socio activo y");
-  console.log("  quedan anotados como incidencia de pago.\n");
+  console.log("  Los marcados [pago] y [firma] sí están cubiertos: cuentan con normalidad");
+  console.log("  y además quedan anotados como incidencia.\n");
   for (const [raw, entry] of unrecognisedStates) {
-    const marca = isPaymentIncidence({ status: raw }) ? " [pago]" : "";
+    const marca = isPaymentIncidence({ status: raw }) ? " [pago]"
+      : isSignatureIncidence({ status: raw }) ? " [firma]" : "";
     console.log(`  ${String(entry.count).padStart(6)}  ${raw}${marca}`);
   }
   console.log();
@@ -138,7 +140,9 @@ await writeFile(reportFile, JSON.stringify({
   generatedAt: new Date().toISOString(),
   subscriptions: subscriptions.length,
   estadosSinReconocer: unrecognisedStates.map(([raw, entry]) => ({
-    estado: raw, count: entry.count, incidenciaDePago: isPaymentIncidence({ status: raw }),
+    estado: raw, count: entry.count,
+    incidenciaDePago: isPaymentIncidence({ status: raw }),
+    incidenciaDeFirma: isSignatureIncidence({ status: raw }),
   })),
   codigos: codeRows,
   ofertas: offerRows,
