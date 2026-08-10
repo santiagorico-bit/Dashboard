@@ -10,6 +10,33 @@ function statusLabel(status) {
   return status === "live" ? "Tiempo real" : status === "stale" ? "Histórico" : "Sin conectar";
 }
 
+function escapeAttribute(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * El banco de arriba avisa de la sesión caducada. Sin esto, un centro que
+ * reutiliza su última captura buena se veía igual que uno recogido hoy.
+ */
+function renderBanner(clubs) {
+  const banner = document.querySelector("#banner");
+  const expired = clubs.filter((club) => club.authFailed);
+  const stale = clubs.filter((club) => club.freshness === "stale" && club.lastError);
+  banner.classList.toggle("banner-alert", expired.length > 0);
+
+  let body;
+  if (expired.length > 0) {
+    const names = expired.map((club) => club.name).join(", ");
+    body = `<strong>Sesión de Resamania caducada</strong><p>${names} ${expired.length === 1 ? "muestra su última captura válida" : "muestran su última captura válida"}, no los datos de hoy. Ejecuta <code>npm run setup:club</code> y vuelve a lanzar <code>npm run collect:dashboard</code>.</p>`;
+  } else if (stale.length > 0) {
+    body = `<strong>Captura incompleta</strong><p>${stale.length} ${stale.length === 1 ? "centro conserva" : "centros conservan"} la lectura anterior porque la última pasada falló. Pasa el ratón por su estado para ver el motivo.</p>`;
+  } else {
+    body = `<strong>Conectando fuentes por centro</strong><p>La interfaz está lista. Las métricas no conectadas se muestran como “—”, nunca como ceros.</p>`;
+  }
+
+  banner.innerHTML = `<div class="banner-icon">!</div><div>${body}</div><span id="connection-count"></span>`;
+}
+
 function objectiveMetric(label, actual, target, percentage, kind, detail = "") {
   const width = percentage === null ? 0 : Math.max(0, Math.min(100, percentage));
   return `<div class="objective-metric ${kind}"><span class="objective-label">${label}</span><div class="objective-values"><strong>${value(actual)}</strong><span>de ${value(target)}</span></div>${detail ? `<small>${detail}</small>` : ""}<span class="objective-percent">${percentage === null ? "—" : `${fmtNumber.format(percentage)}%`}</span><div class="objective-track"><i style="width:${width}%"></i></div></div>`;
@@ -127,6 +154,7 @@ function render(data) {
   const live = data.clubs.filter((club) => club.freshness === "live").length;
   const stale = data.clubs.filter((club) => club.freshness === "stale").length;
   const off = data.clubs.length - live - stale;
+  renderBanner(data.clubs);
   document.querySelector("#connection-count").textContent = `${live}/${data.clubs.length} centros en tiempo real`;
   document.querySelector("#total-memberships").textContent = value(data.totals.memberships || null);
   document.querySelector("#total-cancellations").textContent = value(data.clubs.some(c => c.cancellations !== null) ? data.totals.cancellations : null);
@@ -169,7 +197,7 @@ function render(data) {
 }
 
 function drawTable(clubs) {
-  document.querySelector("#club-table").innerHTML = clubs.map((club) => `<tr><td><strong>${club.name}</strong><small>${club.id}</small></td><td>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</td><td><span class="badge ${club.freshness}">${statusLabel(club.freshness)}</span></td><td>${value(club.members)}</td><td>${value(club.memberships)}</td><td>${value(club.cancellations)}</td><td>${value(club.revenue, fmtCurrency)}</td><td>${value(club.billing, fmtCurrency)}</td><td>${club.sourcePeriod ?? "—"}</td></tr>`).join("");
+  document.querySelector("#club-table").innerHTML = clubs.map((club) => `<tr><td><strong>${club.name}</strong><small>${club.id}</small></td><td>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</td><td><span class="badge ${club.freshness}"${club.lastError ? ` title="${escapeAttribute(club.lastError)}"` : ""}>${statusLabel(club.freshness)}</span></td><td>${value(club.members)}</td><td>${value(club.memberships)}</td><td>${value(club.cancellations)}</td><td>${value(club.revenue, fmtCurrency)}</td><td>${value(club.billing, fmtCurrency)}</td><td>${club.sourcePeriod ?? "—"}</td></tr>`).join("");
 }
 
 async function load() {
