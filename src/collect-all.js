@@ -68,6 +68,10 @@ try {
   const returnFeeCode = await run("extract-nuevo-centro-return-fee-cancellations.js", { optional: true });
   if (returnFeeCode !== 0) console.error("No se actualizó el listado de bajas automáticas por gastos de devolución.");
 
+  // Deja una copia abrible sin servidor con los datos recién recogidos.
+  const exportCode = await run("export-dashboard-html.js", { optional: true });
+  if (exportCode !== 0) console.error("No se pudo exportar la copia HTML del dashboard.");
+
   await runSessionAlert({
     snapshotFile: join(rootDir, "artifacts", "dashboard-live.json"),
     stateFile: join(rootDir, "artifacts", ".session-alert.json"),

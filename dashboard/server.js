@@ -99,7 +99,7 @@ function localDay(value) {
   }).format(new Date(value));
 }
 
-async function buildDashboardData() {
+export async function buildDashboardData() {
   const now = new Date();
   const today = localDay(now);
   const nuevo = await readJson(join(artifactsDir, "cancellations-2026-08-02.json"));
@@ -439,7 +439,12 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => {
+// Sólo escucha cuando se ejecuta directamente. Así el exportador puede
+// importar buildDashboardData sin levantar un servidor de paso.
+const ejecutadoDirectamente = process.argv[1]
+  && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (ejecutadoDirectamente) server.listen(port, host, () => {
   console.log(`Dashboard disponible en http://localhost:${port}`);
   if (isLoopback) return;
   for (const address of localAddresses()) {

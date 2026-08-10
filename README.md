@@ -38,6 +38,21 @@ $env:HOST="0.0.0.0"; npm run dashboard  # Windows
 Por defecto escucha sólo en este equipo. El dashboard no pide contraseña y
 muestra datos de socios, así que abrirlo a la red es una decisión explícita.
 
+## Copia sin servidor
+
+Cada recogida deja además `artifacts/dashboard.html`: un único fichero con los
+estilos, el código y los datos dentro, que se abre con doble clic sin servidor
+ni conexión. Sirve para consultar el cierre desde otro equipo o para guardarlo
+como registro del día.
+
+```bash
+npm run export:html          # regenerarlo a mano
+```
+
+Es una captura fija: lleva sellada la fecha y hora de generación y el botón de
+actualizar queda desactivado, para que no se confunda con el dashboard en vivo.
+Contiene datos de socios, así que se trata como el resto de `artifacts/`.
+
 ## Automatización
 
 Recogida cada cinco minutos y arranque al iniciar sesión:
