@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSessionAlert } from "./session-alert.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const lockFile = join(rootDir, "artifacts", ".collect-all.lock");
@@ -61,9 +62,18 @@ try {
   if (fitnessCode !== 0) console.error("FitnessKPI no se actualizó; no se usará una captura de otro día.");
   const leadCode = await run("collect-lead.js", { optional: true });
   if (leadCode !== 0) console.error("Lead 2.0 no se actualizó; se conservará la última captura disponible.");
-  await run("collect-dashboard.js");
+  // La recogida de Resamania puede fallar por sesión caducada; el aviso se
+  // manda igualmente más abajo, por eso no se interrumpe aquí.
+  const dashboardResult = await run("collect-dashboard.js").then(() => null, (error) => error);
   const returnFeeCode = await run("extract-nuevo-centro-return-fee-cancellations.js", { optional: true });
   if (returnFeeCode !== 0) console.error("No se actualizó el listado de bajas automáticas por gastos de devolución.");
+
+  await runSessionAlert({
+    snapshotFile: join(rootDir, "artifacts", "dashboard-live.json"),
+    stateFile: join(rootDir, "artifacts", ".session-alert.json"),
+  });
+
+  if (dashboardResult) throw dashboardResult;
 } finally {
   await rm(lockFile, { force: true });
 }

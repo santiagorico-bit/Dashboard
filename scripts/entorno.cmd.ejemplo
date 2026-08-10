@@ -1,0 +1,20 @@
+@echo off
+REM Copia este fichero a scripts\entorno.cmd y rellena los valores.
+REM scripts\entorno.cmd está excluido de git: no se sube la contraseña.
+REM
+REM Sin esto, el dashboard sigue avisando en pantalla de la sesión caducada;
+REM lo único que falta es el correo.
+
+REM Servidor de correo saliente de onair-fitness.es.
+set SMTP_HOST=
+set SMTP_PORT=587
+
+REM Usuario y contraseña del buzón desde el que se envía.
+REM Si el proveedor admite contraseñas de aplicación, usa una: se revoca
+REM sola sin tocar la del buzón.
+set SMTP_USER=
+set SMTP_PASS=
+
+REM Remitente y destinatario del aviso.
+set ALERT_FROM=
+set ALERT_TO=santiagorico@onair-fitness.es

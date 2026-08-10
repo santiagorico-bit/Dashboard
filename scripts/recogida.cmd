@@ -6,6 +6,10 @@ REM con doble clic para comprobar que todo está bien.
 cd /d "%~dp0.."
 if not exist "artifacts\logs" mkdir "artifacts\logs"
 
+REM Credenciales del correo de aviso, si están configuradas.
+REM Copia scripts\entorno.cmd.ejemplo a scripts\entorno.cmd y rellénalo.
+if exist "scripts\entorno.cmd" call "scripts\entorno.cmd"
+
 REM Evita que el registro crezca sin límite: 288 pasadas al día se acumulan.
 for %%A in ("artifacts\logs\recogida.log") do if %%~zA GTR 5000000 move /y "artifacts\logs\recogida.log" "artifacts\logs\recogida.anterior.log" >nul
 

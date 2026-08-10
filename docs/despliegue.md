@@ -114,8 +114,27 @@ fallarían con un error que no explica nada.
 Si una recogida se queda colgada, el bloqueo se ignora a las dos horas y la
 tarea se corta por límite de ejecución.
 
-### Lo que sigue pendiente
+### Aviso por correo
 
-Que el aviso de sesión caducada llegue por algún medio además del propio
-dashboard — correo, por ejemplo. Es lo que más rinde de lo que queda: sin eso,
-una sesión caída el viernes por la tarde no se detecta hasta el lunes.
+Cuando la sesión caduca, la recogida escribe a `santiagorico@onair-fitness.es`.
+Hace falta configurar el servidor de correo saliente:
+
+```
+copy scripts\entorno.cmd.ejemplo scripts\entorno.cmd
+notepad scripts\entorno.cmd
+```
+
+`scripts\entorno.cmd` está excluido de git, así que la contraseña no se sube.
+Si el proveedor de correo admite contraseñas de aplicación, conviene usar una:
+se revoca sin tocar la del buzón.
+
+Mientras no se configure, el dashboard sigue avisando en pantalla; lo único que
+falta es el correo, y la recogida lo deja anotado en el registro.
+
+**Cuándo escribe.** La recogida corre 288 veces al día: avisar en cada pasada
+fallida sería un correo cada cinco minutos. Sólo escribe en los cambios de
+estado —cuando cae y cuando se recupera—, más un recordatorio cada seis horas
+mientras siga caída. Un día entero de caída son cuatro correos, no 288.
+
+Un fallo al enviar el correo no interrumpe la recogida: queda anotado en
+`artifacts\logs\recogida.log` y la pasada continúa.
