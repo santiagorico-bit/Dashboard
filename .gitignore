@@ -1,0 +1,14 @@
+node_modules/
+.browser-profile/
+artifacts/
+.browser-profile-*/
+.chrome-*/
+.lead-profile/
+.lead-profile-*/
+.fitness-kpi-profile/
+.club-profiles/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store

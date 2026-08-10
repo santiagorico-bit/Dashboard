@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ON AIR · Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/objectives.css" />
+    <link rel="stylesheet" href="/billing.css" />
+    <link rel="stylesheet" href="/incidences.css" />
+    <link rel="stylesheet" href="/watch-data.css" />
+    <link rel="stylesheet" href="/visits.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="#">
+        <span class="brand-mark">OA</span>
+        <span><strong>ON AIR</strong><small>Pulse</small></span>
+      </a>
+      <nav>
+        <button class="nav-item active" data-view="summary"><span>⌁</span>Resumen</button>
+        <button class="nav-item" data-view="clubs"><span>⌂</span>Centros</button>
+        <button class="nav-item" data-view="finance"><span>€</span>Finanzas</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="status-dot"></span>
+        <div><strong>Solo lectura</strong><small>Sin acciones sobre Resamania</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">RED ON AIR · ESPAÑA</p>
+          <h1 id="page-title">Visión general</h1>
+        </div>
+        <div class="top-actions">
+          <label class="period"><span>Periodo</span><select><option>Hoy</option><option>Esta semana</option><option>Este mes</option></select></label>
+          <button class="refresh" id="refresh">Actualizar</button>
+        </div>
+      </header>
+
+      <section class="connection-banner" id="banner">
+        <div class="banner-icon">!</div>
+        <div><strong>Conectando fuentes por centro</strong><p>La interfaz está lista. Las métricas no conectadas se muestran como “—”, nunca como ceros.</p></div>
+        <span id="connection-count">0/7 centros en tiempo real</span>
+      </section>
+
+      <section class="view active" id="summary-view">
+        <div id="group-panels" class="group-panels"></div>
+        <div class="metric-grid">
+          <article class="metric-card accent-blue"><div class="metric-head"><span>Altas</span><i>↗</i></div><strong id="total-memberships">—</strong><p>Hoy en toda la red</p><div class="spark empty"></div></article>
+          <article class="metric-card accent-coral"><div class="metric-head"><span>Bajas</span><i>↘</i></div><strong id="total-cancellations">—</strong><p>Último periodo disponible</p><div class="spark coral"></div></article>
+          <article class="metric-card accent-gold"><div class="metric-head"><span>Cobros realizados</span><i>€</i></div><strong id="total-revenue">—</strong><p>Pagos validados y no anulados</p><div class="spark empty"></div></article>
+          <article class="metric-card accent-ink"><div class="metric-head"><span>Facturación emitida</span><i>€</i></div><strong id="total-billing">—</strong><p>Facturas de hoy, IVA incluido</p><div class="spark empty"></div></article>
+        </div>
+
+        <article class="panel targets-panel">
+          <div class="panel-head"><div><p class="eyebrow">OBJETIVOS MENSUALES</p><h2>Situación frente al objetivo</h2></div><span class="target-period">Mes en curso</span></div>
+          <div id="objective-cards" class="objective-cards"></div>
+        </article>
+
+        <article class="panel watch-panel">
+          <div class="panel-head"><div><p class="eyebrow">SOCIOS</p><h2>Socios activos por centro</h2></div><span class="target-period">Situación actual</span></div>
+          <div id="member-cards" class="watch-cards"></div>
+          <p class="incidence-note">Abono iniciado antes del mes, vigente actualmente, habilitado en FitnessKPI y sin oferta VIP o Web.</p>
+        </article>
+
+        <article class="panel incidences-panel">
+          <div class="panel-head"><div><p class="eyebrow">INCIDENCIAS</p><h2>Altas y bajas que requieren revisión</h2></div><span class="target-period">Mes en curso</span></div>
+          <div class="incidence-summary"><div><span>Altas incompletas</span><strong id="incidence-incomplete-total">—</strong></div><div><span>Bajas · período actual completo</span><strong id="incidence-full-period-total">—</strong></div></div>
+          <div id="incidence-cards" class="incidence-cards"></div>
+          <p class="incidence-note">Altas incompletas: altas del mes con alertas abiertas de incorporación. Las personas con varias alertas cuentan una sola vez.</p>
+        </article>
+
+        <article class="panel watch-panel">
+          <div class="panel-head"><div><p class="eyebrow">DATOS A VIGILAR</p><h2>Abono mensual sin accesos</h2></div><span class="target-period" id="watch-period">—</span></div>
+          <div id="watch-cards" class="watch-cards"></div>
+          <p class="incidence-note">Clientes con “Abono 1 Mes” vigente durante el periodo y ningún acceso válido registrado.</p>
+        </article>
+
+        <div class="content-grid">
+          <article class="panel performance">
+            <div class="panel-head"><div><p class="eyebrow">COMPARATIVA</p><h2>Rendimiento por centro</h2></div><div class="legend"><span class="blue">Altas</span><span class="coral">Bajas</span></div></div>
+            <div id="club-bars" class="club-bars"></div>
+          </article>
+          <article class="panel health">
+            <div class="panel-head"><div><p class="eyebrow">CALIDAD DEL DATO</p><h2>Estado de conexión</h2></div></div>
+            <div class="donut" id="donut"><span><strong id="coverage">0%</strong><small>cobertura</small></span></div>
+            <div class="health-copy"><p><span class="good"></span>Tiempo real <strong id="live-count">0</strong></p><p><span class="warn"></span>Histórico <strong id="stale-count">0</strong></p><p><span class="off"></span>Sin conectar <strong id="off-count">7</strong></p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="clubs-view">
+        <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">7 CENTROS</p><h2>Detalle operativo</h2></div><input id="club-search" placeholder="Buscar centro" /></div><div class="table-wrap"><table><thead><tr><th>Centro</th><th>Tipo</th><th>Estado</th><th>Socios</th><th>Altas</th><th>Bajas</th><th>Cobros</th><th>Facturación</th><th>Periodo</th></tr></thead><tbody id="club-table"></tbody></table></div></article>
+      </section>
+
+      <section class="view" id="finance-view">
+        <div class="finance-hero"><div><p class="eyebrow">FINANZAS</p><h2>Cobros y facturación</h2><p>Son magnitudes distintas y se muestran siempre por separado.</p></div><div class="finance-number"><span>Cobros realizados</span><strong id="finance-revenue">—</strong><small>Pagos validados y no anulados</small><span>Facturación emitida</span><strong id="finance-billing">—</strong><small>Facturas válidas con IVA incluido</small></div></div>
+        <div class="finance-grid"><article class="panel placeholder-chart"><div class="panel-head"><h2>Evolución diaria</h2></div><div class="chart-skeleton"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></article><article class="panel"><div class="panel-head"><h2>Definición contable</h2></div><ul class="definition-list"><li><span>Cobros</span><strong>Dinero efectivamente recibido</strong></li><li><span>Devoluciones</span><strong>Importes devueltos</strong></li><li><span>Ingreso neto</span><strong>Cobros − devoluciones</strong></li><li><span>Facturación</span><strong>Se mostrará por separado</strong></li></ul></article></div>
+      </section>
+
+      <footer><span id="last-update">Esperando primera actualización</span><span>Actualización automática cada 5 minutos</span></footer>
+    </main>
+    <script type="module" src="/app.js?v=20260806-2"></script>
+  </body>
+</html>

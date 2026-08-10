@@ -1,0 +1,9 @@
+{
+  "period": "monthly",
+  "clubs": {
+    "ruzafa": { "memberships": 340, "cancellations": 255, "activeNet": 85, "merch": 1800, "supplements": 1800, "ties": 32, "formulaChanges": 32 },
+    "les-arts": { "memberships": 380, "cancellations": 280, "activeNet": 100, "merch": 2000, "supplements": 1750, "ties": 40, "formulaChanges": 32 },
+    "nuevo-centro": { "memberships": 280, "cancellations": 266, "activeNet": 14, "merch": 1600, "supplements": 1400, "ties": 32, "formulaChanges": 32 },
+    "madrid": { "memberships": 500, "cancellations": 200, "activeNet": 300, "merch": 2120, "supplements": 1840, "ties": 32, "formulaChanges": 32 }
+  }
+}
