@@ -1,4 +1,5 @@
 import http from "node:http";
+import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,17 @@ const publicDir = join(dashboardDir, "public");
 const agentDir = fileURLToPath(new URL("../", import.meta.url));
 const artifactsDir = join(agentDir, "artifacts");
 const port = Number(process.env.PORT ?? 3000);
+// Por defecto sigue escuchando sólo en el equipo. El dashboard no pide
+// contraseña, así que abrirlo a la red local es una decisión explícita.
+const host = process.env.HOST ?? "127.0.0.1";
+const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+
+function localAddresses() {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((iface) => iface && iface.family === "IPv4" && !iface.internal)
+    .map((iface) => iface.address);
+}
 
 const clubs = [
   ["barcelona", "Barcelona Universitat", "3046"],
@@ -423,6 +435,14 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
+server.listen(port, host, () => {
   console.log(`Dashboard disponible en http://localhost:${port}`);
+  if (isLoopback) return;
+  for (const address of localAddresses()) {
+    console.log(`  y desde la red local en http://${address}:${port}`);
+  }
+  console.warn(
+    "Aviso: el dashboard no pide contraseña y muestra datos de socios. " +
+      "Cualquiera con acceso a esta red puede abrirlo.",
+  );
 });
