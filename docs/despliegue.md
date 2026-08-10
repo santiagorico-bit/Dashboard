@@ -68,15 +68,54 @@ la respuesta puede tardar semanas, así que conviene preguntar ya.
 B sólo tiene sentido si no hay ningún equipo que pueda quedarse encendido y C ha
 dicho que no.
 
-## Si se elige A
+## Opción A — instalación
 
-Queda por hacer:
+Elegida. Se instala con un comando, desde la carpeta del proyecto:
 
-1. Una tarea programada que ejecute `node src/collect-all.js` cada X minutos.
-2. Que el dashboard arranque solo al encender el equipo, con `HOST=0.0.0.0`.
-3. Decidir si el aviso de sesión caducada debe llegar por algún medio además del
-   propio dashboard (correo, por ejemplo), para no depender de que alguien lo
-   esté mirando.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1
+```
 
-El punto 3 es el que más rendimiento da: sin él, una sesión caída de viernes por
-la tarde no se detecta hasta el lunes.
+Crea dos tareas programadas con tu usuario:
+
+| Tarea | Cuándo | Qué hace |
+| --- | --- | --- |
+| `OnAir Dashboard - Recogida` | al iniciar sesión, y cada 5 minutos | `scripts\recogida.cmd` → `src/collect-all.js` |
+| `OnAir Dashboard - Servidor` | al iniciar sesión | `scripts\servidor.cmd` → dashboard en `HOST=0.0.0.0` |
+
+Ambas corren **sólo con la sesión iniciada**, porque la recogida abre Chrome con
+el perfil del usuario: sin sesión no hay perfil que abrir. Encender el equipo e
+iniciar sesión dispara una recogida inmediata.
+
+Opciones:
+
+```powershell
+# limitar el dashboard a este equipo
+powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -BindHost 127.0.0.1
+
+# cambiar la frecuencia
+powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -Minutes 10
+
+# desinstalar
+powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -Remove
+```
+
+Los registros quedan en `artifacts\logs\`, con rotación a los 5 MB.
+
+### Solapamiento
+
+Una pasada de siete centros puede tardar más de cinco minutos. Hay dos frenos
+independientes: la tarea está marcada como `IgnoreNew`, así que el programador
+no lanza una segunda si hay una en curso; y `collect-all.js` escribe un bloqueo
+en `artifacts/.collect-all.lock` que corta cualquier pasada simultánea lanzada a
+mano. Sin ellos, dos procesos pelearían por el mismo perfil de Chrome y
+fallarían con un error que no explica nada.
+
+Si una recogida se queda colgada, el bloqueo se ignora a las dos horas y la
+tarea se corta por límite de ejecución.
+
+### Lo que sigue pendiente
+
+Que el aviso de sesión caducada llegue por algún medio además del propio
+dashboard — correo, por ejemplo. Es lo que más rinde de lo que queda: sin eso,
+una sesión caída el viernes por la tarde no se detecta hasta el lunes.
