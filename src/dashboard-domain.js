@@ -12,9 +12,12 @@ export function resourceUri(value) {
 
 export function normalizeState(value) {
   const state = normalizeText(value);
-  if (/^(cancel|canceled|cancelled|cancelado|anulado|void|voided)$/.test(state)) return "canceled";
-  if (/^(valid|validated|valido|pagado|paid)$/.test(state)) return "validated";
-  if (/^(active|activo|accepted|aceptado)$/.test(state)) return "active";
+  // Los estados llegan con el género del sustantivo: una factura es "Anulada"
+  // y una suscripción "Anulado". Reconocer sólo el masculino dejaba pasar las
+  // facturas anuladas como válidas, inflando la facturación.
+  if (/^(cancel|cancell?ed|cancelad[oa]s?|anulad[oa]s?|void(ed)?)$/.test(state)) return "canceled";
+  if (/^(valid|validated|validad[oa]s?|valid[oa]s?|pagad[oa]s?|paid)$/.test(state)) return "validated";
+  if (/^(active|activ[oa]s?|accepted|aceptad[oa]s?)$/.test(state)) return "active";
   return state || null;
 }
 
