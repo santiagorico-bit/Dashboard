@@ -159,3 +159,26 @@ test("los 5xx se siguen reintentando", async () => {
   assert.deepEqual(await client.getJson("/contacts", { endpoint: "contacts.list" }), { ok: true });
   assert.equal(client.snapshotMetrics().retries, 2);
 });
+
+test("reconoce la URL de login real que devuelve Resamania", async () => {
+  // Capturada en una recogida real con la sesión caducada.
+  const url = "https://api.resamania.com/oauth/login/onairespana"
+    + "?client_id=140_xaei06sutrvbieov5c1jhqc23fzum6hjzg0v54awsiu1m4lkbxt"
+    + "&redirect_uri=https%3A%2F%2Fapp.resamania.com%2Fonairespana&response_type=code";
+
+  await assert.rejects(
+    () => assertAppLoaded({ url: () => url }, { club: "Valencia Ruzafa" }),
+    (error) => {
+      assert.ok(error instanceof SessionExpiredError);
+      assert.equal(error.authFailed, true);
+      assert.match(error.message, /npm run setup:group/);
+      return true;
+    },
+  );
+});
+
+test("la URL de la aplicación con sesión viva no salta", async () => {
+  const url = "https://app.resamania.com/onairespana/-/management/infinite-lists"
+    + "/memberships/members?clubId=%2Fonairespana%2Fclubs%2F3043";
+  await assert.doesNotReject(() => assertAppLoaded({ url: () => url }, { club: "Valencia Ruzafa" }));
+});

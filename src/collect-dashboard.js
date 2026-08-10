@@ -66,7 +66,16 @@ async function collect([slug, name, id]) {
       const clubButton = page.getByRole("button", { name: "Club", exact: true });
       if (await clubButton.isVisible().catch(() => false)) await clubButton.click();
     }
-    await targetClub.waitFor({ state: "visible", timeout: 15000 });
+    try {
+      await targetClub.waitFor({ state: "visible", timeout: 15000 });
+    } catch (error) {
+      // La redirección a OAuth llega después de domcontentloaded, así que la
+      // comprobación de arriba aún veía la URL de la aplicación. Aquí ya ha
+      // navegado: es el momento en que se distingue de verdad una sesión
+      // caducada de un selector que tarda.
+      await assertAppLoaded(page, { club: name });
+      throw error;
+    }
     await targetClub.click();
     await page.waitForTimeout(1500);
     await page.goto("about:blank");
