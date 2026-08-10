@@ -9,6 +9,7 @@ import {
   isDayPassSession, isEligibleActiveMember, isPreEligibleMembership, isSession, isTieSession,
   isShortNoticeFullPeriodCancellation, isShortPass, isValidInvoice, isVip, isWebOffer,
   normalizeState, normalizeText, paymentIssueLabel, productCode, signatureIssueLabel,
+  tallyStates,
 } from "./dashboard-domain.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -740,6 +741,13 @@ async function collect([slug, name, id]) {
             .includes("cambio de fórmula"),
         ).length,
         billing: monthlyBilling,
+        // Censo de estados en bruto: sólo etiquetas y recuentos, sin datos de
+        // nadie. Es lo que permite ver si una regla se está quedando corta.
+        stateCensus: {
+          subscriptions: tallyStates(subscriptionHistory),
+          invoices: tallyStates(monthlyInvoices),
+          cancellations: tallyStates(allCancellations),
+        },
         incidences: {
           incompleteMemberships: incompleteContacts.size,
           fullPeriodCancellations,

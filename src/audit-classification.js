@@ -25,6 +25,7 @@ import {
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const cacheDir = join(rootDir, "artifacts", "cache");
+const snapshotFile = join(rootDir, "artifacts", "dashboard-live.json");
 
 /** Estados que `normalizeState` sabe interpretar. */
 const RECOGNISED_STATES = new Set(["canceled", "validated", "active"]);
@@ -71,7 +72,33 @@ async function readCache() {
   return { subscriptions, files };
 }
 
+/**
+ * Estados de facturas y bajas. No se cachean como las suscripciones, así que
+ * el colector deja su censo en el snapshot: es donde vivía el fallo de las
+ * facturas anuladas y donde la caché no llega.
+ */
+async function readCensus() {
+  const census = { invoices: {}, cancellations: {} };
+  let snapshot;
+  try {
+    snapshot = JSON.parse(await readFile(snapshotFile, "utf8"));
+  } catch {
+    return census;
+  }
+  for (const result of snapshot.results ?? []) {
+    const source = result.monthToDate?.stateCensus;
+    if (!source) continue;
+    for (const kind of ["invoices", "cancellations"]) {
+      for (const [state, count] of Object.entries(source[kind] ?? {})) {
+        census[kind][state] = (census[kind][state] ?? 0) + count;
+      }
+    }
+  }
+  return census;
+}
+
 const { subscriptions, files } = await readCache();
+const census = await readCensus();
 
 if (subscriptions.length === 0) {
   console.error(
@@ -122,6 +149,19 @@ if (unrecognisedStates.length === 0) {
   console.log();
 }
 
+for (const [kind, titulo] of [["invoices", "ESTADOS DE FACTURA"], ["cancellations", "ESTADOS DE BAJA"]]) {
+  const entries = Object.entries(census[kind]).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) continue;
+  console.log(titulo);
+  console.log("  Un estado que no normalice a \"canceled\" se cuenta como válido.\n");
+  for (const [state, count] of entries) {
+    const normalizado = normalizeState(state);
+    const marca = RECOGNISED_STATES.has(normalizado) ? `→ ${normalizado}` : "SIN RECONOCER";
+    console.log(`  ${String(count).padStart(6)}  ${state.padEnd(32)} ${marca}`);
+  }
+  console.log();
+}
+
 console.log("CÓDIGOS DE PRODUCTO");
 for (const row of codeRows) {
   console.log(`  ${String(row.count).padStart(6)}  ${row.key.padEnd(24)} ${row.clasificacion}`);
@@ -144,6 +184,8 @@ await writeFile(reportFile, JSON.stringify({
     incidenciaDePago: isPaymentIncidence({ status: raw }),
     incidenciaDeFirma: isSignatureIncidence({ status: raw }),
   })),
+  estadosDeFactura: census.invoices,
+  estadosDeBaja: census.cancellations,
   codigos: codeRows,
   ofertas: offerRows,
 }, null, 2));

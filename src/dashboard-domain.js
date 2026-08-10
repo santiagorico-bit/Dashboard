@@ -127,6 +127,24 @@ export function signatureIssueLabel(item) {
 
 export const isSignatureIncidence = (item) => signatureIssueLabel(item) !== null;
 
+/**
+ * Recuento de los estados en bruto de una colección.
+ *
+ * Sirve para saber qué valores devuelve Resamania de verdad sin guardar nada
+ * de la persona: sólo la etiqueta y cuántas veces aparece.
+ */
+export function tallyStates(items = []) {
+  const counts = {};
+  for (const item of items) {
+    for (const raw of [item?.status, item?.state, item?.financialState]) {
+      if (raw === undefined || raw === null || raw === "") continue;
+      const key = String(raw);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 export function isPreEligibleMembership(item, { from, to, enabledCodes }) {
   const validFrom = item?.validFrom?.slice(0, 10);
   return Boolean(validFrom && validFrom >= from && validFrom <= to) &&
