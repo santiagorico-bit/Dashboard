@@ -150,7 +150,12 @@ async function buildDashboardData() {
     row.revenue = live.revenue;
     row.billing = live.billing ?? null;
     row.refunds = live.refunds;
-    row.freshness = live.period === today ? "live" : "stale";
+    // `stale` lo marca el colector cuando reutiliza una captura anterior porque
+    // la pasada de hoy falló. Sin esto, un fallo de sesión dentro del mismo día
+    // se presentaba como "Tiempo real" con los números de la pasada buena.
+    row.freshness = live.stale || live.period !== today ? "stale" : "live";
+    row.lastError = live.lastError ?? null;
+    row.authFailed = live.lastAuthFailed === true;
     row.lastUpdate = live.collectedAt;
     row.sourcePeriod = live.period;
     row.monthToDate = live.monthToDate ? structuredClone(live.monthToDate) : null;
