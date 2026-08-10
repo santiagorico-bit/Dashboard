@@ -104,8 +104,9 @@ if (subscriptions.length === 0) {
   console.error(
     "No hay datos que revisar todavía.\n\n" +
       "Esta auditoría no entra en Resamania: lee lo que la recogida ya ha guardado\n" +
-      "en artifacts\\cache. Ejecuta antes una recogida (scripts\\recogida.cmd, o bien\n" +
-      "node src/collect-all.js) y vuelve a lanzarla.",
+      "en artifacts/cache. Ejecuta antes una recogida:\n\n" +
+      "  node src/collect-all.js\n\n" +
+      "y vuelve a lanzarla.",
   );
   process.exit(1);
 }

@@ -13,3 +13,4 @@ artifacts/
 *.sqlite-wal
 .DS_Store
 scripts/entorno.cmd
+scripts/entorno.sh

@@ -72,6 +72,14 @@ dicho que no.
 
 Elegida. Se instala con un comando, desde la carpeta del proyecto:
 
+En macOS, con `launchd`:
+
+```bash
+./scripts/instalar-tareas.sh
+```
+
+En Windows, con el Programador de tareas:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1
 ```
@@ -80,8 +88,8 @@ Crea dos tareas programadas con tu usuario:
 
 | Tarea | Cuándo | Qué hace |
 | --- | --- | --- |
-| `OnAir Dashboard - Recogida` | al iniciar sesión, y cada 5 minutos | `scripts\recogida.cmd` → `src/collect-all.js` |
-| `OnAir Dashboard - Servidor` | al iniciar sesión | `scripts\servidor.cmd` → dashboard en `HOST=0.0.0.0` |
+| Recogida | al iniciar sesión, y cada 5 minutos | `recogida.sh` / `recogida.cmd` → `src/collect-all.js` |
+| Servidor | al iniciar sesión | `servidor.sh` / `servidor.cmd` → dashboard en `HOST=0.0.0.0` |
 
 Ambas corren **sólo con la sesión iniciada**, porque la recogida abre Chrome con
 el perfil del usuario: sin sesión no hay perfil que abrir. Encender el equipo e
@@ -89,14 +97,16 @@ iniciar sesión dispara una recogida inmediata.
 
 Opciones:
 
+```bash
+# macOS
+./scripts/instalar-tareas.sh --host 127.0.0.1   # limitar a este equipo
+./scripts/instalar-tareas.sh --minutos 10       # cambiar la frecuencia
+./scripts/instalar-tareas.sh --desinstalar
+```
 ```powershell
-# limitar el dashboard a este equipo
+# Windows
 powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -BindHost 127.0.0.1
-
-# cambiar la frecuencia
 powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -Minutes 10
-
-# desinstalar
 powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1 -Remove
 ```
 
@@ -120,11 +130,14 @@ Cuando la sesión caduca, la recogida escribe a `santiagorico@onair-fitness.es`.
 Hace falta configurar el servidor de correo saliente:
 
 ```
-copy scripts\entorno.cmd.ejemplo scripts\entorno.cmd
-notepad scripts\entorno.cmd
+# macOS
+cp scripts/entorno.sh.ejemplo scripts/entorno.sh && open -e scripts/entorno.sh
+
+# Windows
+copy scripts\entorno.cmd.ejemplo scripts\entorno.cmd && notepad scripts\entorno.cmd
 ```
 
-`scripts\entorno.cmd` está excluido de git, así que la contraseña no se sube.
+Ese fichero está excluido de git, así que la contraseña no se sube.
 Si el proveedor de correo admite contraseñas de aplicación, conviene usar una:
 se revoca sin tocar la del buzón.
 

@@ -1,0 +1,19 @@
+# Copia este fichero a scripts/entorno.sh y rellena los valores.
+# scripts/entorno.sh está excluido de git: no se sube la contraseña.
+#
+# Sin esto, el dashboard sigue avisando en pantalla de la sesión caducada;
+# lo único que falta es el correo.
+
+# Servidor de correo saliente de onair-fitness.es.
+export SMTP_HOST=
+export SMTP_PORT=587
+
+# Usuario y contraseña del buzón desde el que se envía.
+# Si el proveedor admite contraseñas de aplicación, usa una: se revoca
+# sola sin tocar la del buzón.
+export SMTP_USER=
+export SMTP_PASS=
+
+# Remitente y destinatario del aviso.
+export ALERT_FROM=
+export ALERT_TO=santiagorico@onair-fitness.es

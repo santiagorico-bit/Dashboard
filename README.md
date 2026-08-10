@@ -28,8 +28,11 @@ npm run dashboard         # http://localhost:3000
 
 Para verlo desde el móvil u otro equipo de la red, `HOST` elige la interfaz:
 
+```bash
+HOST=0.0.0.0 npm run dashboard          # macOS / Linux
+```
 ```powershell
-$env:HOST="0.0.0.0"; npm run dashboard
+$env:HOST="0.0.0.0"; npm run dashboard  # Windows
 ```
 
 Por defecto escucha sólo en este equipo. El dashboard no pide contraseña y
@@ -39,8 +42,11 @@ muestra datos de socios, así que abrirlo a la red es una decisión explícita.
 
 Recogida cada cinco minutos y arranque al iniciar sesión:
 
+```bash
+./scripts/instalar-tareas.sh                            # macOS (launchd)
+```
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1
+powershell -ExecutionPolicy Bypass -File scripts\instalar-tareas.ps1   # Windows
 ```
 
 Los detalles, las opciones y las alternativas de despliegue están en
@@ -57,8 +63,9 @@ sirviendo su última captura válida, y se envía un aviso por correo. Para
 recuperarla basta con `npm run setup:group`; la siguiente pasada automática la
 retoma sola.
 
-El correo se configura copiando `scripts\entorno.cmd.ejemplo` a
-`scripts\entorno.cmd`, que está excluido de git.
+El correo se configura copiando `scripts/entorno.sh.ejemplo` a
+`scripts/entorno.sh` en macOS, o `scripts\entorno.cmd.ejemplo` a
+`scripts\entorno.cmd` en Windows. Ambos están excluidos de git.
 
 ## Incidencias
 
@@ -86,8 +93,9 @@ ninguna regla contempla, la clasificación falla en silencio.
 npm run audit:clasificacion
 ```
 
-En Windows también vale con hacer doble clic en `scripts\auditoria.cmd`, que
-deja el resultado en `artifacts\logs\auditoria.txt`.
+También se puede lanzar con doble clic: `scripts/auditoria.command` en macOS,
+`scripts\auditoria.cmd` en Windows. Deja el resultado en
+`artifacts/logs/auditoria.txt`.
 
 Lee la caché que la recogida ya ha guardado —sin llamar a la API— y lista los
 estados, códigos de producto y etiquetas de oferta reales, con la clasificación
