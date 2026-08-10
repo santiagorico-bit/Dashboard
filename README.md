@@ -86,6 +86,9 @@ ninguna regla contempla, la clasificación falla en silencio.
 npm run audit:clasificacion
 ```
 
+En Windows también vale con hacer doble clic en `scripts\auditoria.cmd`, que
+deja el resultado en `artifacts\logs\auditoria.txt`.
+
 Lee la caché que la recogida ya ha guardado —sin llamar a la API— y lista los
 estados, códigos de producto y etiquetas de oferta reales, con la clasificación
 que recibe cada uno. Los estados marcados `[pago]` o `[firma]` están cubiertos;

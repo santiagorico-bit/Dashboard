@@ -102,8 +102,10 @@ const census = await readCensus();
 
 if (subscriptions.length === 0) {
   console.error(
-    "No hay suscripciones en caché. Ejecuta primero una recogida (npm run collect:dashboard) " +
-      "y vuelve a lanzar esta auditoría.",
+    "No hay datos que revisar todavía.\n\n" +
+      "Esta auditoría no entra en Resamania: lee lo que la recogida ya ha guardado\n" +
+      "en artifacts\\cache. Ejecuta antes una recogida (scripts\\recogida.cmd, o bien\n" +
+      "node src/collect-all.js) y vuelve a lanzarla.",
   );
   process.exit(1);
 }
