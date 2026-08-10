@@ -8,7 +8,7 @@ import {
   contactOf, hasPriorFormulaChange, isCdd, isEligibleCancellation, isFormulaChange,
   isDayPassSession, isEligibleActiveMember, isPreEligibleMembership, isSession, isTieSession,
   isShortNoticeFullPeriodCancellation, isShortPass, isValidInvoice, isVip, isWebOffer,
-  normalizeState, normalizeText, productCode,
+  normalizeState, normalizeText, paymentIssueLabel, productCode,
 } from "./dashboard-domain.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -204,14 +204,23 @@ async function collect([slug, name, id]) {
       activeMemberSubscriptions.push(...members);
       if (!payload["hydra:view"]?.["hydra:next"]) break;
     }
+    const eligibleActiveSubscriptions = activeMemberSubscriptions.filter((item) => isEligibleActiveMember(item, {
+      from: monthStart, to: today, enabledCodes: fitnessKpiEnabledProductCodes,
+    }));
     const activeMembers = new Set(
-      activeMemberSubscriptions
-        .filter((item) => isEligibleActiveMember(item, {
-          from: monthStart, to: today, enabledCodes: fitnessKpiEnabledProductCodes,
-        }))
-        .map(contactOf)
-        .filter(Boolean),
+      eligibleActiveSubscriptions.map(contactOf).filter(Boolean),
     ).size;
+    // Un abono pendiente de pago sigue contando como socio activo: entra al
+    // club. Se anota aparte para poder reclamar el cobro.
+    const paymentIssueContacts = new Set();
+    const paymentIssueStates = {};
+    for (const item of eligibleActiveSubscriptions) {
+      const label = paymentIssueLabel(item);
+      if (!label) continue;
+      const contact = contactOf(item);
+      if (contact) paymentIssueContacts.add(contact);
+      paymentIssueStates[label] = (paymentIssueStates[label] ?? 0) + 1;
+    }
     const getCancellationSubscription = async (item) => {
       return api.getSubscription(item.subscription, { contact: item.contact ?? item.contactId });
     };
@@ -727,6 +736,8 @@ async function collect([slug, name, id]) {
           automaticReturnFeeOnly,
           pendingCancellations: pendingCancellations.length,
           nextPendingCancellationDate,
+          paymentIncidences: paymentIssueContacts.size,
+          paymentIncidenceStates: paymentIssueStates,
         },
         salesFunnel: {
           visits: visitContactIds.size,

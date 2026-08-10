@@ -56,6 +56,42 @@ export const isShortPass = (item) => {
     /(^|\W)day\s*pass(\W|$)/i.test(label);
 };
 
+/**
+ * Estados que delatan un problema de cobro.
+ *
+ * Un abono pendiente de pago sigue siendo un socio activo —entra al club—, así
+ * que no se excluye de ningún recuento: sólo se anota como incidencia.
+ *
+ * La lista está abierta a propósito. Los estados exactos que devuelve Resamania
+ * se ven con `npm run audit:clasificacion`; si aparece uno que falta, se añade
+ * aquí y queda cubierto en toda la aplicación.
+ */
+export const PAYMENT_ISSUE_PATTERNS = [
+  /pendiente\s*(de\s*)?pago/,
+  /pago\s*pendiente/,
+  /impag/,      // impagado, impagada, impago
+  /devuelt/,    // recibo devuelto
+  /rechazad/,   // cobro rechazado
+  /moros/,
+  /unpaid/,
+  /pending[\s_-]*payment/,
+  /payment[\s_-]*(pending|failed|error|issue|due)/,
+  /overdue/,
+  /outstanding/,
+];
+
+/** Devuelve el estado original que ha disparado la incidencia, o null. */
+export function paymentIssueLabel(item) {
+  for (const raw of [item?.status, item?.state, item?.financialState, item?.paymentStatus]) {
+    const value = normalizeText(raw);
+    if (!value) continue;
+    if (PAYMENT_ISSUE_PATTERNS.some((pattern) => pattern.test(value))) return String(raw);
+  }
+  return null;
+}
+
+export const isPaymentIncidence = (item) => paymentIssueLabel(item) !== null;
+
 export function isPreEligibleMembership(item, { from, to, enabledCodes }) {
   const validFrom = item?.validFrom?.slice(0, 10);
   return Boolean(validFrom && validFrom >= from && validFrom <= to) &&

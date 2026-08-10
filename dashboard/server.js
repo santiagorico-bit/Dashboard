@@ -359,6 +359,7 @@ async function buildDashboardData() {
       totals.oneMonthCancellations += row.incidences.oneMonthCancellations ?? 0;
       totals.automaticReturnFeeOnly += row.incidences.automaticReturnFeeOnly ?? 0;
       totals.pendingCancellations += row.incidences.pendingCancellations ?? 0;
+      totals.paymentIncidences += row.incidences.paymentIncidences ?? 0;
       return totals;
     },
     {
@@ -367,6 +368,7 @@ async function buildDashboardData() {
       oneMonthCancellations: 0,
       automaticReturnFeeOnly: 0,
       pendingCancellations: 0,
+      paymentIncidences: 0,
     },
   );
 

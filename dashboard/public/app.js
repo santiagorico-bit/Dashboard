@@ -37,6 +37,19 @@ function renderBanner(clubs) {
   banner.innerHTML = `<div class="banner-icon">!</div><div>${body}</div><span id="connection-count"></span>`;
 }
 
+/**
+ * Detalle de los estados que han provocado cada incidencia de pago. Saber si
+ * es un recibo devuelto o un cobro sin lanzar cambia a quién hay que llamar.
+ */
+function paymentStateDetail(states) {
+  const entries = Object.entries(states ?? {});
+  if (entries.length === 0) return "Sin incidencias";
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([state, count]) => `${state}: ${count}`)
+    .join(" · ");
+}
+
 function objectiveMetric(label, actual, target, percentage, kind, detail = "") {
   const width = percentage === null ? 0 : Math.max(0, Math.min(100, percentage));
   return `<div class="objective-metric ${kind}"><span class="objective-label">${label}</span><div class="objective-values"><strong>${value(actual)}</strong><span>de ${value(target)}</span></div>${detail ? `<small>${detail}</small>` : ""}<span class="objective-percent">${percentage === null ? "—" : `${fmtNumber.format(percentage)}%`}</span><div class="objective-track"><i style="width:${width}%"></i></div></div>`;
@@ -185,7 +198,8 @@ function render(data) {
   });
   document.querySelector("#incidence-incomplete-total").textContent = value(data.incidences?.totals?.incompleteMemberships);
   document.querySelector("#incidence-full-period-total").textContent = value(data.incidences?.totals?.fullPeriodCancellations);
-  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div></dl></section>`).join("");
+  document.querySelector("#incidence-payment-total").textContent = value(data.incidences?.totals?.paymentIncidences);
+  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div><div class="incidence-payment"><dt>Incidencias de pago</dt><dd>${value(club.paymentIncidences)}</dd><small>${paymentStateDetail(club.paymentIncidenceStates)}</small></div></dl></section>`).join("");
   document.querySelector("#watch-period").textContent = data.watchData?.period?.label ?? "Pendiente";
   document.querySelector("#watch-cards").innerHTML = (data.watchData?.clubs ?? []).map((club) => `<section class="watch-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><strong>${value(club.count)}</strong></section>`).join("");
 
