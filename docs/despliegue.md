@@ -26,7 +26,7 @@ local con `HOST=0.0.0.0`.
 
 - **Coste**: cero, salvo la luz.
 - **Datos**: no salen del local. Es lo más limpio en protección de datos.
-- **Reautenticación**: alguien ejecuta `npm run setup:club` cuando el dashboard
+- **Reautenticación**: alguien ejecuta `npm run setup:group` cuando el dashboard
   avisa en rojo. Con el aviso implementado, se ve en cuanto pasa.
 - **Punto débil**: si ese equipo se apaga o se actualiza solo, se para todo.
 

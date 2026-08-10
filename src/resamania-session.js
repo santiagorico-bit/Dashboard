@@ -44,7 +44,7 @@ export function sessionExpiredMessage({ club, status } = {}) {
   return (
     `La sesión de Resamania ha caducado${where}${code}. ` +
     "La API está devolviendo el login en lugar de datos. " +
-    "Ejecuta `npm run setup:club` para reautenticar el perfil del navegador."
+    "Ejecuta `npm run setup:group` para reautenticar el perfil del navegador."
   );
 }
 

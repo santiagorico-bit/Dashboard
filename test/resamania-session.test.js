@@ -47,7 +47,7 @@ test("los errores de negocio no se confunden con sesión caducada", () => {
 
 test("el mensaje dice qué comando resuelve el bloqueo", () => {
   const message = sessionExpiredMessage({ club: "Valencia Ruzafa", status: 401 });
-  assert.match(message, /npm run setup:club/);
+  assert.match(message, /npm run setup:group/);
   assert.match(message, /Valencia Ruzafa/);
   assert.match(message, /HTTP 401/);
 });

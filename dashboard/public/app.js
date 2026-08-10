@@ -27,7 +27,7 @@ function renderBanner(clubs) {
   let body;
   if (expired.length > 0) {
     const names = expired.map((club) => club.name).join(", ");
-    body = `<strong>Sesión de Resamania caducada</strong><p>${names} ${expired.length === 1 ? "muestra su última captura válida" : "muestran su última captura válida"}, no los datos de hoy. Ejecuta <code>npm run setup:club</code> y vuelve a lanzar <code>npm run collect:dashboard</code>.</p>`;
+    body = `<strong>Sesión de Resamania caducada</strong><p>${names} ${expired.length === 1 ? "muestra su última captura válida" : "muestran su última captura válida"}, no los datos de hoy. Ejecuta <code>npm run setup:group</code> y vuelve a lanzar <code>npm run collect:dashboard</code>.</p>`;
   } else if (stale.length > 0) {
     body = `<strong>Captura incompleta</strong><p>${stale.length} ${stale.length === 1 ? "centro conserva" : "centros conservan"} la lectura anterior porque la última pasada falló. Pasa el ratón por su estado para ver el motivo.</p>`;
   } else {

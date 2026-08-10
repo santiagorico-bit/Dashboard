@@ -70,7 +70,7 @@ export function composeMessage(action, clubs, { period } = {}) {
       "marcada como histórica: no son los datos de hoy.",
       "",
       "Para arreglarlo, en el ordenador del dashboard:",
-      "  npm run setup:club",
+      "  npm run setup:group",
       "",
       "La siguiente recogida automática lo recuperará sola.",
     ].filter((line) => line !== null).join("\n"),

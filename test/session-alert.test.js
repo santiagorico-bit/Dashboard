@@ -73,7 +73,7 @@ test("el mensaje dice qué centros y qué comando ejecutar", () => {
   const { subject, text } = composeMessage("alert", ["Madrid Delicias"], { period: "2026-08-10" });
   assert.match(subject, /caducada \(1 centro\)/);
   assert.match(text, /Madrid Delicias/);
-  assert.match(text, /npm run setup:club/);
+  assert.match(text, /npm run setup:group/);
   assert.match(text, /2026-08-10/);
 });
 
