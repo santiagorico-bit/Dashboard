@@ -53,6 +53,33 @@ Es una captura fija: lleva sellada la fecha y hora de generación y el botón de
 actualizar queda desactivado, para que no se confunda con el dashboard en vivo.
 Contiene datos de socios, así que se trata como el resto de `artifacts/`.
 
+## Consultas puntuales
+
+Para preguntar por un centro concreto sin abrir el dashboard:
+
+```bash
+node src/consulta.js ruzafa resumen
+node src/consulta.js madrid altas --mes
+node src/consulta.js les-arts bajas --desde 2026-08-01 --hasta 2026-08-10
+node src/consulta.js nuevo-centro incidencias
+node src/consulta.js ruzafa facturacion --hoy
+node src/consulta.js madrid contacto "garcia"
+```
+
+Consultas disponibles: `altas`, `bajas`, `activos`, `facturacion`,
+`incidencias`, `contacto` y `resumen`. El centro admite el identificador o el
+nombre (`ruzafa`, `Valencia Ruzafa`); si el texto encaja con varios centros
+—`valencia`, `malaga`— pide que se concrete en vez de elegir por su cuenta.
+
+Sin fechas consulta el mes en curso. `--hoy` acota al día, y `--desde` /
+`--hasta` fijan cualquier rango.
+
+Con `--json` la salida es apta para que la consuma otro programa. Con `--ver`
+se abre el navegador a la vista, útil si algo falla.
+
+Aplica las mismas reglas que el dashboard —`src/dashboard-domain.js`—, así que
+las cifras coinciden con las del cierre.
+
 ## Automatización
 
 Recogida cada cinco minutos y arranque al iniciar sesión:

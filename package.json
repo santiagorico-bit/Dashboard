@@ -22,6 +22,7 @@
     "discover:metrics": "node src/discover-dashboard-metrics.js",
     "audit:clasificacion": "node src/audit-classification.js",
     "export:html": "node src/export-dashboard-html.js",
+    "consulta": "node src/consulta.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
