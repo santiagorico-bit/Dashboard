@@ -13,16 +13,20 @@
     "extract:cancellations-date": "node src/extract-cancellations-date.js",
     "extract:missing-mandates": "node src/extract-missing-mandates.js",
     "dashboard": "node dashboard/server.js",
-    "inspect:dashboard-sources": "node src/inspect-dashboard-sources.js"
-    ,"setup:group": "node src/setup-group-profile.js",
-    "test:group-access": "node src/test-group-access.js"
-    ,"setup:club": "node src/setup-club-profile.js"
-    ,"validate:clubs": "node src/validate-club-profiles.js"
-    ,"collect:dashboard": "node src/collect-dashboard.js"
-    ,"discover:metrics": "node src/discover-dashboard-metrics.js"
-    ,"test": "node --test test/*.test.js"
+    "inspect:dashboard-sources": "node src/inspect-dashboard-sources.js",
+    "setup:group": "node src/setup-group-profile.js",
+    "test:group-access": "node src/test-group-access.js",
+    "setup:club": "node src/setup-club-profile.js",
+    "validate:clubs": "node src/validate-club-profiles.js",
+    "collect:dashboard": "node src/collect-dashboard.js",
+    "discover:metrics": "node src/discover-dashboard-metrics.js",
+    "audit:clasificacion": "node src/audit-classification.js",
+    "export:html": "node src/export-dashboard-html.js",
+    "consulta": "node src/consulta.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "nodemailer": "^9.0.5",
     "playwright": "^1.54.1"
   }
 }

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,17 @@ const publicDir = join(dashboardDir, "public");
 const agentDir = fileURLToPath(new URL("../", import.meta.url));
 const artifactsDir = join(agentDir, "artifacts");
 const port = Number(process.env.PORT ?? 3000);
+// Por defecto sigue escuchando sólo en el equipo. El dashboard no pide
+// contraseña, así que abrirlo a la red local es una decisión explícita.
+const host = process.env.HOST ?? "127.0.0.1";
+const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+
+function localAddresses() {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((iface) => iface && iface.family === "IPv4" && !iface.internal)
+    .map((iface) => iface.address);
+}
 
 const clubs = [
   ["barcelona", "Barcelona Universitat", "3046"],
@@ -87,7 +99,7 @@ function localDay(value) {
   }).format(new Date(value));
 }
 
-async function buildDashboardData() {
+export async function buildDashboardData() {
   const now = new Date();
   const today = localDay(now);
   const nuevo = await readJson(join(artifactsDir, "cancellations-2026-08-02.json"));
@@ -150,7 +162,12 @@ async function buildDashboardData() {
     row.revenue = live.revenue;
     row.billing = live.billing ?? null;
     row.refunds = live.refunds;
-    row.freshness = live.period === today ? "live" : "stale";
+    // `stale` lo marca el colector cuando reutiliza una captura anterior porque
+    // la pasada de hoy falló. Sin esto, un fallo de sesión dentro del mismo día
+    // se presentaba como "Tiempo real" con los números de la pasada buena.
+    row.freshness = live.stale || live.period !== today ? "stale" : "live";
+    row.lastError = live.lastError ?? null;
+    row.authFailed = live.lastAuthFailed === true;
     row.lastUpdate = live.collectedAt;
     row.sourcePeriod = live.period;
     row.monthToDate = live.monthToDate ? structuredClone(live.monthToDate) : null;
@@ -342,6 +359,8 @@ async function buildDashboardData() {
       totals.oneMonthCancellations += row.incidences.oneMonthCancellations ?? 0;
       totals.automaticReturnFeeOnly += row.incidences.automaticReturnFeeOnly ?? 0;
       totals.pendingCancellations += row.incidences.pendingCancellations ?? 0;
+      totals.paymentIncidences += row.incidences.paymentIncidences ?? 0;
+      totals.signatureIncidences += row.incidences.signatureIncidences ?? 0;
       return totals;
     },
     {
@@ -350,6 +369,8 @@ async function buildDashboardData() {
       oneMonthCancellations: 0,
       automaticReturnFeeOnly: 0,
       pendingCancellations: 0,
+      paymentIncidences: 0,
+      signatureIncidences: 0,
     },
   );
 
@@ -418,6 +439,19 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
+// Sólo escucha cuando se ejecuta directamente. Así el exportador puede
+// importar buildDashboardData sin levantar un servidor de paso.
+const ejecutadoDirectamente = process.argv[1]
+  && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (ejecutadoDirectamente) server.listen(port, host, () => {
   console.log(`Dashboard disponible en http://localhost:${port}`);
+  if (isLoopback) return;
+  for (const address of localAddresses()) {
+    console.log(`  y desde la red local en http://${address}:${port}`);
+  }
+  console.warn(
+    "Aviso: el dashboard no pide contraseña y muestra datos de socios. " +
+      "Cualquiera con acceso a esta red puede abrirlo.",
+  );
 });

@@ -12,9 +12,12 @@ export function resourceUri(value) {
 
 export function normalizeState(value) {
   const state = normalizeText(value);
-  if (/^(cancel|canceled|cancelled|cancelado|anulado|void|voided)$/.test(state)) return "canceled";
-  if (/^(valid|validated|valido|pagado|paid)$/.test(state)) return "validated";
-  if (/^(active|activo|accepted|aceptado)$/.test(state)) return "active";
+  // Los estados llegan con el género del sustantivo: una factura es "Anulada"
+  // y una suscripción "Anulado". Reconocer sólo el masculino dejaba pasar las
+  // facturas anuladas como válidas, inflando la facturación.
+  if (/^(cancel|cancell?ed|cancelad[oa]s?|anulad[oa]s?|void(ed)?)$/.test(state)) return "canceled";
+  if (/^(valid|validated|validad[oa]s?|valid[oa]s?|pagad[oa]s?|paid)$/.test(state)) return "validated";
+  if (/^(active|activ[oa]s?|accepted|aceptad[oa]s?)$/.test(state)) return "active";
   return state || null;
 }
 
@@ -52,6 +55,95 @@ export const isShortPass = (item) => {
     label.includes("sesion de prueba") ||
     /(^|\W)day\s*pass(\W|$)/i.test(label);
 };
+
+/**
+ * Estados que delatan un problema de cobro.
+ *
+ * Un abono pendiente de pago sigue siendo un socio activo —entra al club—, así
+ * que no se excluye de ningún recuento: sólo se anota como incidencia.
+ *
+ * La lista está abierta a propósito. Los estados exactos que devuelve Resamania
+ * se ven con `npm run audit:clasificacion`; si aparece uno que falta, se añade
+ * aquí y queda cubierto en toda la aplicación.
+ */
+export const PAYMENT_ISSUE_PATTERNS = [
+  /pendiente\s*(de\s*)?pago/,
+  /pago\s*pendiente/,
+  /impag/,      // impagado, impagada, impago
+  /devuelt/,    // recibo devuelto
+  /rechazad/,   // cobro rechazado
+  /moros/,
+  /unpaid/,
+  /pending[\s_-]*payment/,
+  /payment[\s_-]*(pending|failed|error|issue|due)/,
+  /overdue/,
+  /outstanding/,
+];
+
+/** Devuelve el estado original que ha disparado la incidencia, o null. */
+export function paymentIssueLabel(item) {
+  for (const raw of [item?.status, item?.state, item?.financialState, item?.paymentStatus]) {
+    const value = normalizeText(raw);
+    if (!value) continue;
+    if (PAYMENT_ISSUE_PATTERNS.some((pattern) => pattern.test(value))) return String(raw);
+  }
+  return null;
+}
+
+export const isPaymentIncidence = (item) => paymentIssueLabel(item) !== null;
+
+/**
+ * Estados de un alta que aún no está formalizada.
+ *
+ * El alta cuenta desde el primer día —la persona ya es socia—, pero sin firma
+ * puede quedar invalidada más adelante, así que necesita seguimiento. Igual que
+ * con los cobros: se anota, no se descuenta.
+ */
+export const SIGNATURE_ISSUE_PATTERNS = [
+  /(en\s*espera|pendiente)\s*(de\s*)?firma/,
+  /firma\s*pendiente/,
+  /sin\s*firmar/,
+  /no\s*firmad[oa]/,
+  /falta\s*(la\s*)?firma/,
+  /no\s*formalizad[oa]/,
+  /sin\s*formalizar/,
+  /(pendiente|falta)\s*(de\s*)?formaliza/,
+  /formalizacion\s*pendiente/,
+  /(pending|awaiting)[\s_-]*signature/,
+  /signature[\s_-]*(pending|missing|required)/,
+  /unsigned/,
+  /not[\s_-]*signed/,
+];
+
+/** Devuelve el estado original que ha disparado la incidencia, o null. */
+export function signatureIssueLabel(item) {
+  for (const raw of [item?.status, item?.state, item?.contractState, item?.signatureStatus]) {
+    const value = normalizeText(raw);
+    if (!value) continue;
+    if (SIGNATURE_ISSUE_PATTERNS.some((pattern) => pattern.test(value))) return String(raw);
+  }
+  return null;
+}
+
+export const isSignatureIncidence = (item) => signatureIssueLabel(item) !== null;
+
+/**
+ * Recuento de los estados en bruto de una colección.
+ *
+ * Sirve para saber qué valores devuelve Resamania de verdad sin guardar nada
+ * de la persona: sólo la etiqueta y cuántas veces aparece.
+ */
+export function tallyStates(items = []) {
+  const counts = {};
+  for (const item of items) {
+    for (const raw of [item?.status, item?.state, item?.financialState]) {
+      if (raw === undefined || raw === null || raw === "") continue;
+      const key = String(raw);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
 
 export function isPreEligibleMembership(item, { from, to, enabledCodes }) {
   const validFrom = item?.validFrom?.slice(0, 10);

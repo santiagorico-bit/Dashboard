@@ -3,11 +3,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ResamaniaApiClient } from "./resamania-api-client.js";
+import { assertAppLoaded, verifySession } from "./resamania-session.js";
 import {
   contactOf, hasPriorFormulaChange, isCdd, isEligibleCancellation, isFormulaChange,
   isDayPassSession, isEligibleActiveMember, isPreEligibleMembership, isSession, isTieSession,
   isShortNoticeFullPeriodCancellation, isShortPass, isValidInvoice, isVip, isWebOffer,
-  normalizeState, normalizeText, productCode,
+  normalizeState, normalizeText, paymentIssueLabel, productCode, signatureIssueLabel,
+  tallyStates,
 } from "./dashboard-domain.js";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -56,12 +58,24 @@ async function collect([slug, name, id]) {
     });
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(appBase, { waitUntil: "domcontentloaded", timeout: 45000 });
+    // Si el perfil ha perdido la sesión, aquí ya estamos en el login: cortar
+    // ahora evita 15 s esperando un selector de club que no va a aparecer.
+    await assertAppLoaded(page, { club: name });
     const targetClub = page.getByRole("button", { name: clubSelectorLabels[slug], exact: true });
     if (!(await targetClub.isVisible().catch(() => false))) {
       const clubButton = page.getByRole("button", { name: "Club", exact: true });
       if (await clubButton.isVisible().catch(() => false)) await clubButton.click();
     }
-    await targetClub.waitFor({ state: "visible", timeout: 15000 });
+    try {
+      await targetClub.waitFor({ state: "visible", timeout: 15000 });
+    } catch (error) {
+      // La redirección a OAuth llega después de domcontentloaded, así que la
+      // comprobación de arriba aún veía la URL de la aplicación. Aquí ya ha
+      // navegado: es el momento en que se distingue de verdad una sesión
+      // caducada de un selector que tarda.
+      await assertAppLoaded(page, { club: name });
+      throw error;
+    }
     await targetClub.click();
     await page.waitForTimeout(1500);
     await page.goto("about:blank");
@@ -78,7 +92,12 @@ async function collect([slug, name, id]) {
     for (let attempt = 0; attempt < 30 && !contactsResponse; attempt += 1) {
       await page.waitForTimeout(500);
     }
-    if (!contactsResponse) throw new Error("No se cargó la sesión de datos del club");
+    if (!contactsResponse) {
+      // Distingue "sesión caducada" de "la lista tardó demasiado": el mensaje
+      // genérico obligaba a adivinar cuál de las dos cosas había pasado.
+      await assertAppLoaded(page, { club: name });
+      throw new Error("No se cargó la sesión de datos del club");
+    }
     const rawHeaders = await contactsResponse.request().allHeaders();
     const headers = Object.fromEntries(
       Object.entries(rawHeaders).filter(([header]) => !header.startsWith(":")),
@@ -93,6 +112,9 @@ async function collect([slug, name, id]) {
       concurrency: 6,
       retries: 4,
     }).init();
+    // Que el navegador tenga sesión no garantiza que las cabeceras capturadas
+    // sirvan al reproducirlas desde context.request. Una sonda barata lo cierra.
+    await verifySession(context.request, { baseUrl: apiBase, headers, club: name });
     const motivesPayload = (await api.get("/referentials/cancellation_motives", {
       endpoint: "referentials.cancellationMotives", allowStatuses: [400, 403, 404],
     })).data ?? {};
@@ -174,6 +196,17 @@ async function collect([slug, name, id]) {
     const membershipSubscriptions = preEligibleMembershipSubscriptions.filter(
       (_item, index) => !fullPriorFormulaFlags[index],
     );
+    // Un alta sin firmar cuenta como alta —la persona ya es socia—, pero puede
+    // quedar invalidada si nadie la persigue, así que se anota aparte.
+    const signatureIssueContacts = new Set();
+    const signatureIssueStates = {};
+    for (const item of membershipSubscriptions) {
+      const label = signatureIssueLabel(item);
+      if (!label) continue;
+      const contact = contactOf(item);
+      if (contact) signatureIssueContacts.add(contact);
+      signatureIssueStates[label] = (signatureIssueStates[label] ?? 0) + 1;
+    }
     const sessionSubscriptions = subscriptions.filter(isSession);
     const activeMemberSubscriptions = [];
     for (let pageNumber = 1; pageNumber <= 50; pageNumber += 1) {
@@ -192,14 +225,23 @@ async function collect([slug, name, id]) {
       activeMemberSubscriptions.push(...members);
       if (!payload["hydra:view"]?.["hydra:next"]) break;
     }
+    const eligibleActiveSubscriptions = activeMemberSubscriptions.filter((item) => isEligibleActiveMember(item, {
+      from: monthStart, to: today, enabledCodes: fitnessKpiEnabledProductCodes,
+    }));
     const activeMembers = new Set(
-      activeMemberSubscriptions
-        .filter((item) => isEligibleActiveMember(item, {
-          from: monthStart, to: today, enabledCodes: fitnessKpiEnabledProductCodes,
-        }))
-        .map(contactOf)
-        .filter(Boolean),
+      eligibleActiveSubscriptions.map(contactOf).filter(Boolean),
     ).size;
+    // Un abono pendiente de pago sigue contando como socio activo: entra al
+    // club. Se anota aparte para poder reclamar el cobro.
+    const paymentIssueContacts = new Set();
+    const paymentIssueStates = {};
+    for (const item of eligibleActiveSubscriptions) {
+      const label = paymentIssueLabel(item);
+      if (!label) continue;
+      const contact = contactOf(item);
+      if (contact) paymentIssueContacts.add(contact);
+      paymentIssueStates[label] = (paymentIssueStates[label] ?? 0) + 1;
+    }
     const getCancellationSubscription = async (item) => {
       return api.getSubscription(item.subscription, { contact: item.contact ?? item.contactId });
     };
@@ -708,6 +750,13 @@ async function collect([slug, name, id]) {
             .includes("cambio de fórmula"),
         ).length,
         billing: monthlyBilling,
+        // Censo de estados en bruto: sólo etiquetas y recuentos, sin datos de
+        // nadie. Es lo que permite ver si una regla se está quedando corta.
+        stateCensus: {
+          subscriptions: tallyStates(subscriptionHistory),
+          invoices: tallyStates(monthlyInvoices),
+          cancellations: tallyStates(allCancellations),
+        },
         incidences: {
           incompleteMemberships: incompleteContacts.size,
           fullPeriodCancellations,
@@ -715,6 +764,10 @@ async function collect([slug, name, id]) {
           automaticReturnFeeOnly,
           pendingCancellations: pendingCancellations.length,
           nextPendingCancellationDate,
+          paymentIncidences: paymentIssueContacts.size,
+          paymentIncidenceStates: paymentIssueStates,
+          signatureIncidences: signatureIssueContacts.size,
+          signatureIncidenceStates: signatureIssueStates,
         },
         salesFunnel: {
           visits: visitContactIds.size,
@@ -739,7 +792,11 @@ async function collect([slug, name, id]) {
       },
     };
   } catch (error) {
-    return { slug, name, id, ok: false, error: error.message, period: today, apiMetrics: api?.snapshotMetrics() ?? null };
+    return {
+      slug, name, id, ok: false, error: error.message, period: today,
+      authFailed: error.authFailed === true,
+      apiMetrics: api?.snapshotMetrics() ?? null,
+    };
   } finally {
     if (api) await api.flushCache().catch(() => {});
     if (context) {
@@ -768,15 +825,40 @@ async function persistProgress() {
     const previous = previousBySlug.get(slug);
     if (!attempt) return previous ?? { slug, name, id, ok: false, error: "Sin captura" };
     if (attempt.ok) return attempt;
-    return previous?.ok ? { ...previous, lastError: attempt.error } : attempt;
+    // Conservar la última captura buena es correcto, pero presentarla sin
+    // marcar equivale a enseñar datos viejos con hora nueva. Se etiqueta.
+    return previous?.ok
+      ? {
+          ...previous,
+          stale: true,
+          staleSince: previous.collectedAt ?? previous.period ?? null,
+          lastError: attempt.error,
+          lastAuthFailed: attempt.authFailed === true,
+        }
+      : attempt;
   });
   const output = { generatedAt: new Date().toISOString(), period: today, results };
   await writeFile(`${artifactsDir}/dashboard-live.json`, JSON.stringify(output, null, 2), "utf8");
   previousResults = results;
 }
+let sessionExpired = false;
 for (const club of clubsToCollect) {
-  attemptedResults.push(await collect(club));
+  const result = await collect(club);
+  attemptedResults.push(result);
   await persistProgress();
+  // Si la sesión ha caducado fallará igual en los seis centros restantes:
+  // seguir sólo alarga la pasada y ensucia el snapshot con datos marcados.
+  if (result.authFailed) {
+    sessionExpired = true;
+    break;
+  }
 }
 console.log(JSON.stringify(attemptedResults, null, 2));
+if (sessionExpired) {
+  const pending = clubsToCollect
+    .filter(([slug]) => !attemptedResults.some((result) => result.slug === slug))
+    .map(([, clubName]) => clubName);
+  console.error(`\n${attemptedResults.at(-1).error}`);
+  if (pending.length > 0) console.error(`Centros sin recoger en esta pasada: ${pending.join(", ")}.`);
+}
 process.exit(attemptedResults.every((result) => result.ok) ? 0 : 1);

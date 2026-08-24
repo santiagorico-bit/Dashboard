@@ -10,6 +10,73 @@ function statusLabel(status) {
   return status === "live" ? "Tiempo real" : status === "stale" ? "Histórico" : "Sin conectar";
 }
 
+function escapeAttribute(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * El banco de arriba avisa de la sesión caducada. Sin esto, un centro que
+ * reutiliza su última captura buena se veía igual que uno recogido hoy.
+ */
+function renderBanner(clubs) {
+  const banner = document.querySelector("#banner");
+  const expired = clubs.filter((club) => club.authFailed);
+  const stale = clubs.filter((club) => club.freshness === "stale" && club.lastError);
+  banner.classList.toggle("banner-alert", expired.length > 0);
+
+  let body;
+  if (expired.length > 0) {
+    const names = expired.map((club) => club.name).join(", ");
+    body = `<strong>Sesión de Resamania caducada</strong><p>${names} ${expired.length === 1 ? "muestra su última captura válida" : "muestran su última captura válida"}, no los datos de hoy. Ejecuta <code>npm run setup:group</code> y vuelve a lanzar <code>npm run collect:dashboard</code>.</p>`;
+  } else if (stale.length > 0) {
+    body = `<strong>Captura incompleta</strong><p>${stale.length} ${stale.length === 1 ? "centro conserva" : "centros conservan"} la lectura anterior porque la última pasada falló. Pasa el ratón por su estado para ver el motivo.</p>`;
+  } else {
+    body = `<strong>Conectando fuentes por centro</strong><p>La interfaz está lista. Las métricas no conectadas se muestran como “—”, nunca como ceros.</p>`;
+  }
+
+  banner.innerHTML = `<div class="banner-icon">!</div><div>${body}</div><span id="connection-count"></span>`;
+}
+
+/**
+ * Detalle de los estados que han provocado una incidencia. Saber si es un
+ * recibo devuelto o un cobro sin lanzar cambia a quién hay que llamar.
+ */
+function stateDetail(states) {
+  const entries = Object.entries(states ?? {});
+  if (entries.length === 0) return "Sin incidencias";
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([state, count]) => `${state}: ${count}`)
+    .join(" · ");
+}
+
+/**
+ * Recuadro de aviso de contratos no formalizados.
+ *
+ * Estas altas ya cuentan: Resamania muestra a la persona como cliente y aquí se
+ * suma igual. El riesgo es que decaigan por falta de seguimiento, así que el
+ * aviso va aparte en vez de perderse como una línea más de cada tarjeta.
+ */
+function renderContractAlert(incidences) {
+  const box = document.querySelector("#contract-alert");
+  const clubs = (incidences?.clubs ?? []).filter((club) => (club.signatureIncidences ?? 0) > 0);
+  const total = incidences?.totals?.signatureIncidences ?? 0;
+
+  if (total === 0 || clubs.length === 0) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+
+  const detalle = clubs
+    .sort((a, b) => b.signatureIncidences - a.signatureIncidences)
+    .map((club) => `<li><span>${club.name}</span><strong>${value(club.signatureIncidences)}</strong><small>${stateDetail(club.signatureIncidenceStates)}</small></li>`)
+    .join("");
+
+  box.hidden = false;
+  box.innerHTML = `<div class="contract-alert-head"><span class="contract-alert-icon">!</span><div><strong>${value(total)} ${total === 1 ? "contrato sin formalizar" : "contratos sin formalizar"}</strong><p>Cuentan como alta —Resamania ya muestra a estas personas como clientes—, pero pueden decaer si nadie completa la firma. Revísalos antes del cierre de mes.</p></div></div><ul class="contract-alert-list">${detalle}</ul>`;
+}
+
 function objectiveMetric(label, actual, target, percentage, kind, detail = "") {
   const width = percentage === null ? 0 : Math.max(0, Math.min(100, percentage));
   return `<div class="objective-metric ${kind}"><span class="objective-label">${label}</span><div class="objective-values"><strong>${value(actual)}</strong><span>de ${value(target)}</span></div>${detail ? `<small>${detail}</small>` : ""}<span class="objective-percent">${percentage === null ? "—" : `${fmtNumber.format(percentage)}%`}</span><div class="objective-track"><i style="width:${width}%"></i></div></div>`;
@@ -127,6 +194,7 @@ function render(data) {
   const live = data.clubs.filter((club) => club.freshness === "live").length;
   const stale = data.clubs.filter((club) => club.freshness === "stale").length;
   const off = data.clubs.length - live - stale;
+  renderBanner(data.clubs);
   document.querySelector("#connection-count").textContent = `${live}/${data.clubs.length} centros en tiempo real`;
   document.querySelector("#total-memberships").textContent = value(data.totals.memberships || null);
   document.querySelector("#total-cancellations").textContent = value(data.clubs.some(c => c.cancellations !== null) ? data.totals.cancellations : null);
@@ -157,7 +225,10 @@ function render(data) {
   });
   document.querySelector("#incidence-incomplete-total").textContent = value(data.incidences?.totals?.incompleteMemberships);
   document.querySelector("#incidence-full-period-total").textContent = value(data.incidences?.totals?.fullPeriodCancellations);
-  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div></dl></section>`).join("");
+  document.querySelector("#incidence-payment-total").textContent = value(data.incidences?.totals?.paymentIncidences);
+  document.querySelector("#incidence-signature-total").textContent = value(data.incidences?.totals?.signatureIncidences);
+  renderContractAlert(data.incidences);
+  document.querySelector("#incidence-cards").innerHTML = (data.incidences?.clubs ?? []).map((club) => `<section class="incidence-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><dl><div><dt>Altas incompletas</dt><dd>${value(club.incompleteMemberships)}</dd></div><div><dt>Bajas solicitadas pendientes</dt><dd>${value(club.pendingCancellations)}</dd><small>${club.nextPendingCancellationDate ? `Próxima: ${new Date(`${club.nextPendingCancellationDate}T12:00:00`).toLocaleDateString("es-ES")}` : "Sin fecha próxima"}</small></div><div><dt>Período completo</dt><dd>${value(club.fullPeriodCancellations)}</dd></div><div><dt>Abono 1 mes</dt><dd>${value(club.oneMonthCancellations)}</dd></div><div><dt>Sistema · solo devolución</dt><dd>${value(club.automaticReturnFeeOnly)}</dd></div><div class="incidence-payment"><dt>Incidencias de pago</dt><dd>${value(club.paymentIncidences)}</dd><small>${stateDetail(club.paymentIncidenceStates)}</small></div><div class="incidence-signature"><dt>Contratos no formalizados</dt><dd>${value(club.signatureIncidences)}</dd><small>${stateDetail(club.signatureIncidenceStates)}</small></div></dl></section>`).join("");
   document.querySelector("#watch-period").textContent = data.watchData?.period?.label ?? "Pendiente";
   document.querySelector("#watch-cards").innerHTML = (data.watchData?.clubs ?? []).map((club) => `<section class="watch-card"><div><strong>${club.name}</strong><small>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</small></div><strong>${value(club.count)}</strong></section>`).join("");
 
@@ -169,7 +240,7 @@ function render(data) {
 }
 
 function drawTable(clubs) {
-  document.querySelector("#club-table").innerHTML = clubs.map((club) => `<tr><td><strong>${club.name}</strong><small>${club.id}</small></td><td>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</td><td><span class="badge ${club.freshness}">${statusLabel(club.freshness)}</span></td><td>${value(club.members)}</td><td>${value(club.memberships)}</td><td>${value(club.cancellations)}</td><td>${value(club.revenue, fmtCurrency)}</td><td>${value(club.billing, fmtCurrency)}</td><td>${club.sourcePeriod ?? "—"}</td></tr>`).join("");
+  document.querySelector("#club-table").innerHTML = clubs.map((club) => `<tr><td><strong>${club.name}</strong><small>${club.id}</small></td><td>${club.ownership === "owned" ? "Propio" : "Franquiciado"}</td><td><span class="badge ${club.freshness}"${club.lastError ? ` title="${escapeAttribute(club.lastError)}"` : ""}>${statusLabel(club.freshness)}</span></td><td>${value(club.members)}</td><td>${value(club.memberships)}</td><td>${value(club.cancellations)}</td><td>${value(club.revenue, fmtCurrency)}</td><td>${value(club.billing, fmtCurrency)}</td><td>${club.sourcePeriod ?? "—"}</td></tr>`).join("");
 }
 
 async function load() {

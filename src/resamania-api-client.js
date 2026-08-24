@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { resourceUri } from "./dashboard-domain.js";
+import { classifyResponse, SessionExpiredError, sessionExpiredMessage } from "./resamania-session.js";
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -89,8 +90,22 @@ export class ResamaniaApiClient {
           const responseHeaders = typeof response.allHeaders === "function"
             ? await response.allHeaders()
             : response.headers();
+          const sessionVerdict = classifyResponse({ status, headers: responseHeaders, url });
+          // Un 200 con HTML es el formulario de login: jamás es un dato válido,
+          // ni siquiera si el llamante tolera el código con allowStatuses.
+          if (sessionVerdict === "session" && response.ok()) {
+            this.metrics.errors += 1;
+            metric.errors += 1;
+            throw new SessionExpiredError(sessionExpiredMessage({ status }), { status, url });
+          }
           if (response.ok()) return { status, data: await response.json(), headers: responseHeaders };
           if (allowStatuses.includes(status)) return { status, data: null, headers: responseHeaders };
+          // Un 401 (o un 403 no tolerado) significa reautenticar, no reintentar.
+          if (sessionVerdict === "session") {
+            this.metrics.errors += 1;
+            metric.errors += 1;
+            throw new SessionExpiredError(sessionExpiredMessage({ status }), { status, url });
+          }
           const retryable = status === 429 || status >= 500;
           lastError = new ResamaniaApiError(`${endpoint}: HTTP ${status}`, { status, endpoint, url });
           if (!retryable || attempt === this.retries) throw lastError;
@@ -100,6 +115,8 @@ export class ResamaniaApiClient {
           metric.retries += 1;
           await sleep(delay);
         } catch (error) {
+          // Reintentar una sesión caducada sólo multiplica la espera por 5.
+          if (error instanceof SessionExpiredError) throw error;
           if (error instanceof ResamaniaApiError) {
             if (attempt === this.retries || (error.status !== 429 && error.status < 500)) {
               this.metrics.errors += 1; metric.errors += 1; throw error;
