@@ -1,0 +1,24 @@
+name: Lanzar pasada ON AIR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  request-pass:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Autenticar en Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/247884600896/locations/global/workloadIdentityPools/github/providers/onair-dashboard
+          service_account: onair-mobile-trigger@total-name-510214-j0.iam.gserviceaccount.com
+
+      - name: Solicitar pasada real
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enviar orden al agente
+        run: gcloud pubsub topics publish onair-pass-requests --project=total-name-510214-j0 --message='{"source":"github-mobile"}'
