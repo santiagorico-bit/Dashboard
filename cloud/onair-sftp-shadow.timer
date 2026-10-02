@@ -1,9 +1,9 @@
 [Unit]
-Description=Run ON AIR Resamania SFTP shadow ingestion every 15 minutes
+Description=Run ON AIR Resamania SFTP shadow ingestion hourly
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=15min
+OnCalendar=hourly
 Persistent=true
 RandomizedDelaySec=30
 Unit=onair-sftp-shadow.service

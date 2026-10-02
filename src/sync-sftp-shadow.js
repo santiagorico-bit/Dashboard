@@ -16,6 +16,11 @@ const remoteRoot = process.env.RESAMANIA_SFTP_PATH || "/";
 const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
 const chunkSize = 400;
 const trustedHostFingerprints = new Set(process.env.RESAMANIA_SFTP_HOST_FINGERPRINT.split(",").map((value) => value.trim().replace(/^SHA256:/, "")));
+const verifyHostKey = (key) => {
+  const fingerprint = createHash("sha256").update(key).digest("base64");
+  if (!trustedHostFingerprints.has(fingerprint)) console.error(`[SFTP] Huella de host no reconocida: SHA256:${fingerprint}`);
+  return trustedHostFingerprints.has(fingerprint);
+};
 
 async function ingest(action, body = {}, attempts = 3) {
   let lastError;
@@ -70,7 +75,7 @@ try {
     username: process.env.RESAMANIA_SFTP_USER,
     password: process.env.RESAMANIA_SFTP_PASSWORD,
     readyTimeout: 30_000,
-    hostVerifier: (key) => trustedHostFingerprints.has(createHash("sha256").update(key).digest("base64")),
+    hostVerifier: verifyHostKey,
   });
   const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) => Number(a.modifyTime || 0) - Number(b.modifyTime || 0));
   filesSeen = listed.length;
