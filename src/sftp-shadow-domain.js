@@ -36,7 +36,7 @@ export function mapRecord(entity, record, ordinal = 0) {
   ]) ?? createHash("sha256").update(`${entity}:${JSON.stringify(row)}:${ordinal}`).digest("hex");
   return {
     externalUid: String(externalUid),
-    clubCode: first(row, ["clubcode", "codeclub", "clubuid", "uidclub"]),
+    clubCode: first(row, ["clubcode", "codeclub", "crossingpointclubcode"]),
     contactUid: first(row, ["contactuid", "uidcontact", "memberuid", "clientuid"]),
     occurredAt: first(row, ["crossedat", "passageat", "generatedat", "invoicedate", "paymentdate", "receptiondate", "cancellationdate", "createdat"]),
     sourceUpdatedAt: first(row, ["updatedat", "modifiedat", "lastupdatedat"]),

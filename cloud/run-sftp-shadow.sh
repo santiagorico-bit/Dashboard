@@ -8,7 +8,7 @@ export RESAMANIA_SFTP_HOST=ssh.cluster131.hosting.ovh.net
 export RESAMANIA_SFTP_PORT=22
 export RESAMANIA_SFTP_USER=squadni-resa
 export RESAMANIA_SFTP_PATH=.
-export RESAMANIA_SFTP_MAX_FILES=12
+export RESAMANIA_SFTP_MAX_FILES=40
 export RESAMANIA_SFTP_HOST_FINGERPRINT=SHA256:ry5S7obJV8ofKcdC3TCg0U/O11IGxQAEKHNkxImOgJ8,SHA256:N4DQHF8Pzfs8s5/QgV8tEx5NgKZeghhkDfpnO+ZG7Fo
 export RESAMANIA_SFTP_PASSWORD
 RESAMANIA_SFTP_PASSWORD="$(gcloud secrets versions access latest --secret=onair-resamania-sftp-password --project="$PROJECT_ID")"
