@@ -12,17 +12,32 @@
     "extract:cancellations": "node src/extract-cancellations.js",
     "extract:cancellations-date": "node src/extract-cancellations-date.js",
     "extract:missing-mandates": "node src/extract-missing-mandates.js",
+    "extract:cancellation-access-buckets": "node src/extract-cancellation-access-buckets.js",
+    "extract:cancellation-access-buckets:barcelona": "node src/extract-cancellation-access-buckets.js barcelona",
+    "extract:cancellation-access-buckets:madrid": "node src/extract-cancellation-access-buckets.js madrid",
+    "extract:cancellation-access-buckets:malaga-armengual": "node src/extract-cancellation-access-buckets.js malaga-armengual",
+    "extract:cancellation-access-buckets:malaga-soho": "node src/extract-cancellation-access-buckets.js malaga-soho",
+    "extract:cancellation-access-buckets:les-arts": "node src/extract-cancellation-access-buckets.js les-arts",
+    "extract:cancellation-access-buckets:nuevo-centro": "node src/extract-cancellation-access-buckets.js nuevo-centro",
+    "extract:cancellation-access-buckets:ruzafa": "node src/extract-cancellation-access-buckets.js ruzafa",
     "dashboard": "node dashboard/server.js",
-    "inspect:dashboard-sources": "node src/inspect-dashboard-sources.js"
-    ,"setup:group": "node src/setup-group-profile.js",
-    "test:group-access": "node src/test-group-access.js"
-    ,"setup:club": "node src/setup-club-profile.js"
-    ,"validate:clubs": "node src/validate-club-profiles.js"
-    ,"collect:dashboard": "node src/collect-dashboard.js"
-    ,"discover:metrics": "node src/discover-dashboard-metrics.js"
-    ,"test": "node --test test/*.test.js"
+    "inspect:dashboard-sources": "node src/inspect-dashboard-sources.js",
+    "setup:group": "node src/setup-group-profile.js",
+    "test:group-access": "node src/test-group-access.js",
+    "maintain:group-session": "node src/maintain-group-session.js",
+    "setup:club": "node src/setup-club-profile.js",
+    "validate:clubs": "node src/validate-club-profiles.js",
+    "collect:dashboard": "node src/collect-dashboard.js",
+    "collect:commercial": "node src/collect-commercial-performance.js",
+    "publish:kpis": "node src/publish-club-kpis.js",
+    "sync:sftp-shadow": "node src/sync-sftp-shadow.js",
+    "maintain:paquita": "node src/paquita-maintenance.js",
+    "discover:metrics": "node src/discover-dashboard-metrics.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "playwright": "^1.54.1"
+    "csv-parse": "^7.0.3",
+    "playwright": "^1.54.1",
+    "ssh2-sftp-client": "^12.1.1"
   }
 }

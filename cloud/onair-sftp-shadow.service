@@ -1,0 +1,19 @@
+[Unit]
+Description=ON AIR Resamania SFTP shadow ingestion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=onair
+Group=onair
+EnvironmentFile=/etc/onair/resamania-sftp.env
+ExecStart=/opt/onair/resamania-agent/cloud/run-sftp-shadow.sh
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target

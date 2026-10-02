@@ -1,0 +1,107 @@
+import { createHash } from "node:crypto";
+import { createReadStream, promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { parse } from "csv-parse";
+import SftpClient from "ssh2-sftp-client";
+import { entityFromFilename, isCsvFile, mapRecord, sha256File } from "./sftp-shadow-domain.js";
+
+const required = ["RESAMANIA_SFTP_HOST", "RESAMANIA_SFTP_USER", "RESAMANIA_SFTP_PASSWORD", "RESAMANIA_SFTP_HOST_FINGERPRINT", "RESAMANIA_SFTP_INGEST_URL", "RESAMANIA_SFTP_INGEST_TOKEN"];
+for (const key of required) if (!process.env[key]) throw new Error(`Falta ${key}`);
+
+const endpoint = process.env.RESAMANIA_SFTP_INGEST_URL;
+const ingestToken = process.env.RESAMANIA_SFTP_INGEST_TOKEN;
+const apiKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+const remoteRoot = process.env.RESAMANIA_SFTP_PATH || "/";
+const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
+const chunkSize = 400;
+
+async function ingest(action, body = {}, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-ingest-token": ingestToken, ...(apiKey ? { apikey: apiKey } : {}) },
+        body: JSON.stringify({ action, ...body }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      return response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  throw lastError;
+}
+
+async function processCsv(path, entity, fileId, runId) {
+  const parser = createReadStream(path).pipe(parse({ columns: true, delimiter: ";", bom: true, relax_column_count: true, relax_quotes: true, skip_empty_lines: true, trim: true }));
+  let chunk = [];
+  let rowCount = 0;
+  for await (const record of parser) {
+    chunk.push(mapRecord(entity, record, rowCount));
+    rowCount += 1;
+    if (chunk.length >= chunkSize) {
+      await ingest("upsert_chunk", { runId, fileId, entity, rows: chunk });
+      chunk = [];
+    }
+  }
+  if (chunk.length) await ingest("upsert_chunk", { runId, fileId, entity, rows: chunk });
+  return rowCount;
+}
+
+const sftp = new SftpClient("onair-resamania-shadow");
+const tempDirectory = await fs.mkdtemp(join(tmpdir(), "onair-sftp-"));
+let runId;
+let filesSeen = 0;
+let filesProcessed = 0;
+let failedFiles = 0;
+let rowsUpserted = 0;
+
+try {
+  const started = await ingest("run_start", { metadata: { mode: "shadow", host: process.env.RESAMANIA_SFTP_HOST } });
+  runId = started.runId;
+  await sftp.connect({
+    host: process.env.RESAMANIA_SFTP_HOST,
+    port: Number(process.env.RESAMANIA_SFTP_PORT || 22),
+    username: process.env.RESAMANIA_SFTP_USER,
+    password: process.env.RESAMANIA_SFTP_PASSWORD,
+    readyTimeout: 30_000,
+    hostVerifier: (key) => createHash("sha256").update(key).digest("base64") === process.env.RESAMANIA_SFTP_HOST_FINGERPRINT.replace(/^SHA256:/, ""),
+  });
+  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) => Number(a.modifyTime || 0) - Number(b.modifyTime || 0));
+  filesSeen = listed.length;
+  for (const item of listed.slice(0, maxFiles)) {
+    const remotePath = `${remoteRoot.replace(/\/$/, "")}/${item.name}` || `/${item.name}`;
+    const localPath = join(tempDirectory, basename(item.name));
+    const entity = entityFromFilename(item.name);
+    let fileId;
+    try {
+      await sftp.fastGet(remotePath, localPath);
+      const sha256 = await sha256File(localPath);
+      const begun = await ingest("file_begin", { runId, entity, sha256, filename: item.name, remotePath, remoteSize: Number(item.size || 0), remoteModifiedAt: item.modifyTime ? new Date(item.modifyTime).toISOString() : null });
+      fileId = begun.fileId;
+      if (begun.skip) continue;
+      const rowCount = await processCsv(localPath, entity, fileId, runId);
+      await ingest("file_complete", { runId, fileId, rowCount });
+      filesProcessed += 1;
+      rowsUpserted += rowCount;
+    } catch (error) {
+      failedFiles += 1;
+      if (fileId) await ingest("file_fail", { runId, fileId, error: error.message }).catch(() => {});
+      console.error(`[SFTP] ${item.name}: ${error.message}`);
+    } finally {
+      await fs.rm(localPath, { force: true });
+    }
+  }
+  await ingest("run_complete", { runId, filesSeen, filesProcessed, failedFiles, rowsUpserted });
+  console.log(JSON.stringify({ ok: failedFiles === 0, mode: "shadow", filesSeen, filesProcessed, failedFiles, rowsUpserted }));
+} catch (error) {
+  if (runId) await ingest("run_fail", { runId, filesSeen, filesProcessed, rowsUpserted, error: error.message }).catch(() => {});
+  throw error;
+} finally {
+  await sftp.end().catch(() => {});
+  await fs.rm(tempDirectory, { recursive: true, force: true });
+}
