@@ -1,0 +1,36 @@
+name: Resamania SFTP shadow sync
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: resamania-sftp-shadow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      RESAMANIA_SFTP_HOST: ssh.cluster131.hosting.ovh.net
+      RESAMANIA_SFTP_PORT: "22"
+      RESAMANIA_SFTP_USER: squadni-resa
+      RESAMANIA_SFTP_PATH: /
+      RESAMANIA_SFTP_MAX_FILES: "12"
+      RESAMANIA_SFTP_HOST_FINGERPRINT: SHA256:ry5S7obJV8ofKcdC3TCg0U/O11IGxQAEKHNkxImOgJ8
+      RESAMANIA_SFTP_INGEST_URL: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
+      RESAMANIA_SFTP_PASSWORD: ${{ secrets.RESAMANIA_SFTP_PASSWORD }}
+      RESAMANIA_SFTP_INGEST_TOKEN: ${{ secrets.RESAMANIA_SFTP_INGEST_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: npm run sync:sftp-shadow
