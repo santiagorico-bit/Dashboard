@@ -12,7 +12,7 @@ for (const key of required) if (!process.env[key]) throw new Error(`Falta ${key}
 const endpoint = process.env.RESAMANIA_SFTP_INGEST_URL;
 const ingestToken = process.env.RESAMANIA_SFTP_INGEST_TOKEN;
 const apiKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-const remoteRoot = process.env.RESAMANIA_SFTP_PATH || "/";
+const remoteRoot = process.env.RESAMANIA_SFTP_PATH || ".";
 const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
 const chunkSize = 400;
 const normalizeFingerprint = (value) => value.trim().replace(/^SHA256:/, "").replace(/=+$/, "");
@@ -78,10 +78,15 @@ try {
     readyTimeout: 30_000,
     hostVerifier: verifyHostKey,
   });
-  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) => Number(a.modifyTime || 0) - Number(b.modifyTime || 0));
+  const catalog = await ingest("file_catalog", { runId });
+  const processedFiles = new Map((catalog.files ?? []).map((file) => [file.remote_path, file]));
+  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) => Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
   filesSeen = listed.length;
-  for (const item of listed.slice(0, maxFiles)) {
-    const remotePath = `${remoteRoot.replace(/\/$/, "")}/${item.name}` || `/${item.name}`;
+  for (const item of listed) {
+    if (filesProcessed >= maxFiles) break;
+    const remotePath = remoteRoot === "." ? item.name : `${remoteRoot.replace(/\/$/, "")}/${item.name}`;
+    const known = processedFiles.get(remotePath);
+    if (known && Number(known.remote_size) === Number(item.size || 0)) continue;
     const localPath = join(tempDirectory, basename(item.name));
     const entity = entityFromFilename(item.name);
     let fileId;
