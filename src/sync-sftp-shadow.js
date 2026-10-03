@@ -80,11 +80,11 @@ try {
   });
   const catalog = await ingest("file_catalog", { runId });
   const processedFiles = new Map((catalog.files ?? []).map((file) => [file.remote_path, file]));
-  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) => {
-    const aBootstrap = /(?:^|_)init(?:_|\.)/i.test(a.name) ? 1 : 0;
-    const bBootstrap = /(?:^|_)init(?:_|\.)/i.test(b.name) ? 1 : 0;
-    return bBootstrap - aBootstrap || Number(b.modifyTime || 0) - Number(a.modifyTime || 0);
-  });
+  // Current operational deltas must always win the processing budget. Old
+  // `_init` exports are backfilled only after every newer file has been seen;
+  // otherwise a large bootstrap can delay live KPIs for several hours.
+  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) =>
+    Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
   filesSeen = listed.length;
   for (const item of listed) {
     if (filesProcessed >= maxFiles) break;
