@@ -2,9 +2,9 @@ name: Resamania SFTP shadow sync
 
 on:
   schedule:
-    # Redundant quarter-hour triggers compensate for GitHub occasionally
-    # delaying/dropping scheduled runs. Unchanged SFTP files are skipped.
-    - cron: "7,22,37,52 * * * *"
+    # Resamania publishes at most hourly. Run away from the top-of-hour peak
+    # and leave enough time to ingest the complete delivery atomically.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -17,13 +17,15 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     env:
       RESAMANIA_SFTP_HOST: ssh.cluster131.hosting.ovh.net
       RESAMANIA_SFTP_PORT: "22"
       RESAMANIA_SFTP_USER: squadni-resa
       RESAMANIA_SFTP_PATH: .
-      RESAMANIA_SFTP_MAX_FILES: "40"
+      # A single hourly delivery currently contains more than 40 entity files
+      # across all clubs. A lower cap produced successful-but-partial runs.
+      RESAMANIA_SFTP_MAX_FILES: "100"
       RESAMANIA_SFTP_HOST_FINGERPRINT: SHA256:ry5S7obJV8ofKcdC3TCg0U/O11IGxQAEKHNkxImOgJ8,SHA256:N4DQHF8Pzfs8s5/QgV8tEx5NgKZeghhkDfpnO+ZG7Fo
       RESAMANIA_SFTP_INGEST_URL: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
       RESAMANIA_SFTP_PASSWORD: ${{ secrets.RESAMANIA_SFTP_PASSWORD }}
