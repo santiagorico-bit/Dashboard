@@ -26,6 +26,10 @@ jobs:
       # A single hourly delivery currently contains more than 40 entity files
       # across all clubs. A lower cap produced successful-but-partial runs.
       RESAMANIA_SFTP_MAX_FILES: "100"
+      # Bootstrap exports are intentionally excluded from the hourly lane.
+      # Reprocessing a large _init file can consume the whole job timeout and
+      # prevent current deltas from being published.
+      RESAMANIA_SFTP_INCLUDE_INIT: "false"
       RESAMANIA_SFTP_HOST_FINGERPRINT: SHA256:ry5S7obJV8ofKcdC3TCg0U/O11IGxQAEKHNkxImOgJ8,SHA256:N4DQHF8Pzfs8s5/QgV8tEx5NgKZeghhkDfpnO+ZG7Fo
       RESAMANIA_SFTP_INGEST_URL: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
       RESAMANIA_SFTP_PASSWORD: ${{ secrets.RESAMANIA_SFTP_PASSWORD }}

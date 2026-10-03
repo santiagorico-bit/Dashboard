@@ -14,6 +14,7 @@ const ingestToken = process.env.RESAMANIA_SFTP_INGEST_TOKEN;
 const apiKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const remoteRoot = process.env.RESAMANIA_SFTP_PATH || ".";
 const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
+const includeInitialExports = process.env.RESAMANIA_SFTP_INCLUDE_INIT === "true";
 const chunkSize = 400;
 const normalizeFingerprint = (value) => value.trim().replace(/^SHA256:/, "").replace(/=+$/, "");
 const trustedHostFingerprints = new Set(process.env.RESAMANIA_SFTP_HOST_FINGERPRINT.split(",").map(normalizeFingerprint));
@@ -80,11 +81,13 @@ try {
   });
   const catalog = await ingest("file_catalog", { runId });
   const processedFiles = new Map((catalog.files ?? []).map((file) => [file.remote_path, file]));
-  // Current operational deltas must always win the processing budget. Old
-  // `_init` exports are backfilled only after every newer file has been seen;
-  // otherwise a large bootstrap can delay live KPIs for several hours.
-  const listed = (await sftp.list(remoteRoot)).filter(isCsvFile).sort((a, b) =>
-    Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
+  // Current operational deltas must always win the processing budget. Large
+  // `_init` exports run only in an explicit backfill lane; including them in
+  // the hourly job can consume the timeout before live KPIs are published.
+  const listed = (await sftp.list(remoteRoot))
+    .filter(isCsvFile)
+    .filter((item) => includeInitialExports || !/(?:^|[_-])init(?:[_\-.]|$)/i.test(item.name))
+    .sort((a, b) => Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
   filesSeen = listed.length;
   for (const item of listed) {
     if (filesProcessed >= maxFiles) break;
