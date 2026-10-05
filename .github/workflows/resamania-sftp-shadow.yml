@@ -5,7 +5,10 @@ on:
     # GitHub can delay individual scheduled events. Four lightweight attempts
     # per hour ensure that each hourly Resamania delivery is picked up without
     # reprocessing unchanged files.
-    - cron: "7,22,37,52 * * * *"
+    - cron: "7 * * * *"
+    - cron: "22 * * * *"
+    - cron: "37 * * * *"
+    - cron: "52 * * * *"
   workflow_dispatch:
 
 concurrency:
