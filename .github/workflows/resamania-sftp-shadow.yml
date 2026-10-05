@@ -19,8 +19,8 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Job timeout also includes time waiting for a hosted runner. Keep enough
-    # queue allowance; the sync command itself remains capped at eight minutes.
+    # Large hourly deliveries can legitimately need more than eight minutes.
+    # The job-level guard is the single timeout; concurrency prevents overlap.
     timeout-minutes: 30
     env:
       RESAMANIA_SFTP_HOST: ssh.cluster131.hosting.ovh.net
@@ -48,4 +48,4 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --omit=dev
-      - run: timeout 8m npm run sync:sftp-shadow
+      - run: npm run sync:sftp-shadow
