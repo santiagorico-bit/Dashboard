@@ -2,18 +2,16 @@ name: Resamania SFTP shadow sync
 
 on:
   schedule:
-    # GitHub can delay individual scheduled events. Four lightweight attempts
-    # per hour ensure that each hourly Resamania delivery is picked up without
-    # reprocessing unchanged files.
-    - cron: "7 * * * *"
-    - cron: "22 * * * *"
-    - cron: "37 * * * *"
-    - cron: "52 * * * *"
+    # Resamania publishes at most hourly. A single off-peak trigger avoids
+    # building a queue of duplicate jobs when GitHub runner capacity is low.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: resamania-sftp-shadow
-  cancel-in-progress: false
+  # A newer hourly delivery supersedes a job that is still queued. The ingest
+  # itself is idempotent, so unchanged files are never processed twice.
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -21,9 +19,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Never let a stalled SFTP transfer hold the concurrency lock for half an
-    # hour: the next hourly delivery must still be able to run.
-    timeout-minutes: 10
+    # Job timeout also includes time waiting for a hosted runner. Keep enough
+    # queue allowance; the sync command itself remains capped at eight minutes.
+    timeout-minutes: 30
     env:
       RESAMANIA_SFTP_HOST: ssh.cluster131.hosting.ovh.net
       RESAMANIA_SFTP_PORT: "22"
