@@ -18,7 +18,9 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    # Pin the stable hosted-runner pool. `ubuntu-latest` has repeatedly stayed
+    # queued without receiving a machine for this repository.
+    runs-on: ubuntu-22.04
     # Large hourly deliveries can legitimately need more than eight minutes.
     # The job-level guard is the single timeout; concurrency prevents overlap.
     timeout-minutes: 30
