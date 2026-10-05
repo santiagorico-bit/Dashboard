@@ -21,7 +21,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Never let a stalled SFTP transfer hold the concurrency lock for half an
+    # hour: the next hourly delivery must still be able to run.
+    timeout-minutes: 10
     env:
       RESAMANIA_SFTP_HOST: ssh.cluster131.hosting.ovh.net
       RESAMANIA_SFTP_PORT: "22"
@@ -48,4 +50,4 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --omit=dev
-      - run: npm run sync:sftp-shadow
+      - run: timeout 8m npm run sync:sftp-shadow
