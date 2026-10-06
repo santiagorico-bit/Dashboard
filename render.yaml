@@ -5,7 +5,7 @@ services:
     repo: https://github.com/santiagorico-bit/Dashboard
     branch: main
     region: frankfurt
-    plan: starter
+    plan: 0.5c-512mb
     schedule: "10 * * * *"
     buildCommand: npm ci --omit=dev
     startCommand: npm run sync:sftp-shadow
