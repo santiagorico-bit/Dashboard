@@ -1,0 +1,38 @@
+services:
+  - type: cron
+    name: onair-resamania-sftp-sync
+    runtime: node
+    repo: https://github.com/santiagorico-bit/Dashboard
+    branch: main
+    region: frankfurt
+    plan: starter
+    schedule: "10 * * * *"
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run sync:sftp-shadow
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: RESAMANIA_SFTP_HOST
+        sync: false
+      - key: RESAMANIA_SFTP_PORT
+        value: "22"
+      - key: RESAMANIA_SFTP_USER
+        sync: false
+      - key: RESAMANIA_SFTP_PASSWORD
+        sync: false
+      - key: RESAMANIA_SFTP_PATH
+        value: "."
+      - key: RESAMANIA_SFTP_HOST_FINGERPRINT
+        sync: false
+      - key: RESAMANIA_SFTP_INGEST_URL
+        value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
+      - key: RESAMANIA_SFTP_INGEST_TOKEN
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: RESAMANIA_SFTP_MAX_FILES
+        value: "100"
+      - key: RESAMANIA_SFTP_INCLUDE_INIT
+        value: "false"
+      - key: RESAMANIA_SFTP_MAX_AGE_HOURS
+        value: "24"
