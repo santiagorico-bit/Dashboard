@@ -28,8 +28,6 @@ services:
         value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
       - key: RESAMANIA_SFTP_INGEST_TOKEN
         sync: false
-      - key: SUPABASE_PUBLISHABLE_KEY
-        sync: false
       - key: RESAMANIA_SFTP_MAX_FILES
         value: "100"
       - key: RESAMANIA_SFTP_INCLUDE_INIT
