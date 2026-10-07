@@ -1,10 +1,8 @@
 name: Resamania SFTP shadow sync
 
 on:
-  schedule:
-    # Resamania publishes at most hourly. A single off-peak trigger avoids
-    # building a queue of duplicate jobs when GitHub runner capacity is low.
-    - cron: "17 * * * *"
+  # Render is the sole hourly scheduler. Keep this workflow only as a manual
+  # fallback so GitHub runner queues cannot delay or duplicate the sync.
   workflow_dispatch:
 
 concurrency:
