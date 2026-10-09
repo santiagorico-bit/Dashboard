@@ -53,11 +53,15 @@ async function aggregate() {
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
         AND payload->>'createdAt' LIKE $1 || '%'
       GROUP BY club
-    ), active_contacts AS (
+    ), active_memberships AS (
       SELECT club, count(DISTINCT coalesce(contact_uid,external_uid)) active_members
       FROM mapped
-      WHERE entity='contacts' AND source_deleted_at IS NULL
-        AND lower(coalesce(payload->>'state',payload->>'status',payload->>'stateAfter',''))='client'
+      WHERE entity='abonnements' AND source_deleted_at IS NULL
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','active')) !~ '(cancel|canceled|cancelled|resili|termin|ended|expired|inact)'
+        AND coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
+        AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
+          OR coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
       GROUP BY club
     ), cancellations AS (
       SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
@@ -90,7 +94,7 @@ async function aggregate() {
     SELECT c.club, m.*, ac.active_members, x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
       f.visits,f.conversions,a.accesses_month,a.unique_visitors_month,
       greatest(m.ingested_at,x.ingested_at,i.ingested_at,f.ingested_at,a.ingested_at) collected_at
-    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_contacts ac USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
+    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_memberships ac USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
   `, [month, today, yesterday]);
 
   return rows.map((row) => {
