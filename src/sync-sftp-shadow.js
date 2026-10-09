@@ -5,13 +5,16 @@ import { basename, join } from "node:path";
 import { parse } from "csv-parse";
 import SftpClient from "ssh2-sftp-client";
 import { entityFromFilename, isCsvFile, mapRecord, sha256File } from "./sftp-shadow-domain.js";
+import { createPostgresStore } from "./sftp-postgres-store.js";
 
-const required = ["RESAMANIA_SFTP_HOST", "RESAMANIA_SFTP_USER", "RESAMANIA_SFTP_PASSWORD", "RESAMANIA_SFTP_HOST_FINGERPRINT", "RESAMANIA_SFTP_INGEST_URL", "RESAMANIA_SFTP_INGEST_TOKEN"];
+const required = ["RESAMANIA_SFTP_HOST", "RESAMANIA_SFTP_USER", "RESAMANIA_SFTP_PASSWORD", "RESAMANIA_SFTP_HOST_FINGERPRINT"];
 for (const key of required) if (!process.env[key]) throw new Error(`Falta ${key}`);
 
 const endpoint = process.env.RESAMANIA_SFTP_INGEST_URL;
 const ingestToken = process.env.RESAMANIA_SFTP_INGEST_TOKEN;
 const apiKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+const postgresStore = process.env.DATABASE_URL ? createPostgresStore() : null;
+if (!postgresStore && (!endpoint || !ingestToken)) throw new Error("Falta DATABASE_URL o la configuración HTTP de ingestión");
 const remoteRoot = process.env.RESAMANIA_SFTP_PATH || ".";
 const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
 const includeInitialExports = process.env.RESAMANIA_SFTP_INCLUDE_INIT === "true";
@@ -26,6 +29,7 @@ const verifyHostKey = (key) => {
 };
 
 async function ingest(action, body = {}, attempts = 3) {
+  if (postgresStore) return postgresStore.ingest(action, body);
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -125,4 +129,5 @@ try {
 } finally {
   await sftp.end().catch(() => {});
   await fs.rm(tempDirectory, { recursive: true, force: true });
+  await postgresStore?.close().catch(() => {});
 }

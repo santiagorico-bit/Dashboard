@@ -1,4 +1,23 @@
 services:
+  - type: web
+    name: onair-kpi-feed
+    runtime: node
+    repo: https://github.com/santiagorico-bit/Dashboard
+    branch: main
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run serve:sftp-kpis
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: onair-resamania-data
+          property: connectionString
+      - key: LEGACY_KPI_FEED_URL
+        value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/club-kpis-feed
   - type: cron
     name: onair-resamania-sftp-sync
     runtime: node
@@ -28,9 +47,20 @@ services:
         value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
       - key: RESAMANIA_SFTP_INGEST_TOKEN
         sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: onair-resamania-data
+          property: connectionString
       - key: RESAMANIA_SFTP_MAX_FILES
         value: "100"
       - key: RESAMANIA_SFTP_INCLUDE_INIT
-        value: "false"
+        value: "true"
       - key: RESAMANIA_SFTP_MAX_AGE_HOURS
-        value: "24"
+        value: "0"
+
+databases:
+  - name: onair-resamania-data
+    region: frankfurt
+    plan: basic-256mb
+    databaseName: onair_resamania
+    user: onair_agent

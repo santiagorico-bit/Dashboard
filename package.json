@@ -31,12 +31,14 @@
     "collect:commercial": "node src/collect-commercial-performance.js",
     "publish:kpis": "node src/publish-club-kpis.js",
     "sync:sftp-shadow": "node src/sync-sftp-shadow.js",
+    "serve:sftp-kpis": "node src/serve-sftp-kpis.js",
     "maintain:paquita": "node src/paquita-maintenance.js",
     "discover:metrics": "node src/discover-dashboard-metrics.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "csv-parse": "^7.0.3",
+    "pg": "^8.16.3",
     "playwright": "^1.54.1",
     "ssh2-sftp-client": "^12.1.1"
   }
