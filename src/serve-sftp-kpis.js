@@ -57,7 +57,7 @@ async function aggregate() {
       SELECT club, count(DISTINCT coalesce(contact_uid,external_uid)) active_members
       FROM mapped
       WHERE entity='contacts' AND source_deleted_at IS NULL
-        AND lower(coalesce(payload->>'stateAfter',payload->>'state',payload->>'status',''))='client'
+        AND lower(coalesce(payload->>'state',payload->>'status',payload->>'stateAfter',''))='client'
       GROUP BY club
     ), cancellations AS (
       SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
