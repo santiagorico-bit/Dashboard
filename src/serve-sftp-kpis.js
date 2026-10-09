@@ -167,6 +167,15 @@ const server = http.createServer(async (request, response) => {
         GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
       response.end(JSON.stringify({ states: rows })); return;
     }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-fields") {
+      const { rows } = await store.pool.query(`SELECT field, array_agg(DISTINCT value ORDER BY value) FILTER (WHERE value <> '') values
+        FROM resamania_sftp_records r
+        CROSS JOIN LATERAL jsonb_each_text(r.payload) p(field,value)
+        WHERE r.entity='abonnements'
+          AND lower(field) ~ '(state|status|etat|active|start|end|debut|fin|date|product|produit|formula|formule)'
+        GROUP BY field ORDER BY field`);
+      response.end(JSON.stringify({ fields: rows })); return;
+    }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
       let current = await latestSnapshots();
