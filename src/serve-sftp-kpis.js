@@ -187,6 +187,19 @@ const server = http.createServer(async (request, response) => {
         GROUP BY field ORDER BY field`);
       response.end(JSON.stringify({ fields: rows })); return;
     }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-counts") {
+      const month = madridDate().slice(0, 7);
+      const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+        count(*) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') created_rows,
+        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') created_contacts,
+        count(*) FILTER (WHERE payload->>'startedAt' LIKE $1 || '%') started_rows,
+        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE payload->>'startedAt' LIKE $1 || '%') started_contacts
+        FROM resamania_sftp_records
+        WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+          AND lower(coalesce(payload->>'product.code','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        GROUP BY 1 ORDER BY 1`, [month]);
+      response.end(JSON.stringify({ month, clubs: rows })); return;
+    }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
       let current = await latestSnapshots();
