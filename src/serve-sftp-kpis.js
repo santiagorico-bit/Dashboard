@@ -115,9 +115,34 @@ async function aggregate() {
 
 async function persistCurrentSnapshot() {
   const clubs = await aggregate();
+  const refreshedAt = new Date().toISOString();
   for (const row of clubs) await store.pool.query(`INSERT INTO club_kpi_snapshots(club_code,club_name,snapshot_date,collected_at,source,metrics)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
-    [row.club_code, row.club_name, row.snapshot_date, row.collected_at, row.source, row.metrics]);
+    [row.club_code, row.club_name, row.snapshot_date, refreshedAt, row.source, {
+      ...row.metrics,
+      sourceDataThrough: row.collected_at,
+    }]);
+}
+
+let snapshotRefreshRunning = false;
+let lastCompletedSync = null;
+async function refreshAfterCompletedSync() {
+  if (snapshotRefreshRunning) return;
+  snapshotRefreshRunning = true;
+  try {
+    const { rows } = await store.pool.query(`SELECT completed_at
+      FROM resamania_sync_runs WHERE status='completed' AND completed_at IS NOT NULL
+      ORDER BY completed_at DESC LIMIT 1`);
+    const completedAt = rows[0]?.completed_at?.toISOString?.() ?? rows[0]?.completed_at ?? null;
+    if (!completedAt || completedAt === lastCompletedSync) return;
+    await persistCurrentSnapshot();
+    lastCompletedSync = completedAt;
+    console.log(`KPI snapshots refreshed after completed SFTP sync ${completedAt}`);
+  } catch (error) {
+    console.error(`KPI snapshot refresh pending: ${error.message}`);
+  } finally {
+    snapshotRefreshRunning = false;
+  }
 }
 
 async function latestSnapshots() {
@@ -162,4 +187,5 @@ const port = Number(process.env.PORT || 10000);
 server.listen(port, "0.0.0.0", () => console.log(`KPI feed listening on ${port}`));
 await importLegacyHistory();
 setInterval(importLegacyHistory, 15 * 60_000).unref();
-setInterval(() => persistCurrentSnapshot().catch((error) => console.error(`KPI snapshot pending: ${error.message}`)), 30 * 60_000).unref();
+setTimeout(refreshAfterCompletedSync, 1_000).unref();
+setInterval(refreshAfterCompletedSync, 15_000).unref();

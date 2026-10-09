@@ -56,7 +56,7 @@ services:
       - key: RESAMANIA_SFTP_MAX_FILES
         value: "100"
       - key: RESAMANIA_SFTP_INCLUDE_INIT
-        value: "true"
+        value: "false"
       - key: RESAMANIA_SFTP_MAX_AGE_HOURS
         value: "0"
 

@@ -99,7 +99,11 @@ try {
     if (filesProcessed >= maxFiles) break;
     const remotePath = remoteRoot === "." ? item.name : `${remoteRoot.replace(/\/$/, "")}/${item.name}`;
     const known = processedFiles.get(remotePath);
-    if (known && Number(known.remote_size) === Number(item.size || 0)) continue;
+    const remoteModifiedAt = item.modifyTime ? new Date(item.modifyTime).getTime() : 0;
+    const knownModifiedAt = known?.remote_modified_at ? new Date(known.remote_modified_at).getTime() : 0;
+    // A delta export can legitimately keep the same byte size while its rows
+    // change. Only skip it when both size and SFTP modification time match.
+    if (known && Number(known.remote_size) === Number(item.size || 0) && remoteModifiedAt === knownModifiedAt) continue;
     const localPath = join(tempDirectory, basename(item.name));
     const entity = entityFromFilename(item.name);
     let fileId;
