@@ -103,7 +103,11 @@ try {
     const knownModifiedAt = known?.remote_modified_at ? new Date(known.remote_modified_at).getTime() : 0;
     // A delta export can legitimately keep the same byte size while its rows
     // change. Only skip it when both size and SFTP modification time match.
-    if (known && Number(known.remote_size) === Number(item.size || 0) && remoteModifiedAt === knownModifiedAt) continue;
+    // SFTP servers and PostgreSQL do not always retain the same sub-second
+    // precision. Treat timestamps within one second as the same file so an
+    // unchanged delta is not needlessly downloaded and replayed every hour.
+    const sameModifiedAt = remoteModifiedAt > 0 && knownModifiedAt > 0 && Math.abs(remoteModifiedAt - knownModifiedAt) < 1000;
+    if (known && Number(known.remote_size) === Number(item.size || 0) && sameModifiedAt) continue;
     const localPath = join(tempDirectory, basename(item.name));
     const entity = entityFromFilename(item.name);
     let fileId;

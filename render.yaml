@@ -58,7 +58,7 @@ services:
       - key: RESAMANIA_SFTP_INCLUDE_INIT
         value: "false"
       - key: RESAMANIA_SFTP_MAX_AGE_HOURS
-        value: "0"
+        value: "48"
 
 databases:
   - name: onair-resamania-data
