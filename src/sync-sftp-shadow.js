@@ -94,7 +94,7 @@ try {
   const listed = (await sftp.list(remoteRoot))
     .filter(isCsvFile)
     .filter((item) => {
-      const isInitial = /(?:^|[_-])init(?:[_\-.]|$)/i.test(item.name);
+      const isInitial = /(?:^|[_-])init\d*(?:[_\-.]|$)/i.test(item.name);
       return !isInitial || includeInitialExports || initialExportEntities.has(entityFromFilename(item.name));
     })
     .filter((item) => !maxAgeHours || Number(item.modifyTime || 0) >= Date.now() - maxAgeHours * 60 * 60 * 1000)
