@@ -45,13 +45,13 @@ async function aggregate() {
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
     memberships AS (
       SELECT club,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') memberships_month,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%') memberships_today,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%') memberships_yesterday,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $1 || '%') memberships_month,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $2 || '%') memberships_today,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $3 || '%') memberships_yesterday,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='abonnements'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-        AND payload->>'createdAt' LIKE $1 || '%'
+        AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $1 || '%'
       GROUP BY club
     ), active_memberships AS (
       SELECT club, count(DISTINCT coalesce(contact_uid,external_uid)) active_members
@@ -59,9 +59,9 @@ async function aggregate() {
       WHERE entity='abonnements' AND source_deleted_at IS NULL
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
         AND lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','active')) !~ '(cancel|canceled|cancelled|resili|termin|ended|expired|inact)'
-        AND coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
-        AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
-          OR coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
+        AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
+        AND (coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
+          OR coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
       GROUP BY club
     ), cancellations AS (
       SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
