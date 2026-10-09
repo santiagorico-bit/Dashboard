@@ -34,7 +34,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: SYNC_RELEASE
-        value: "2026-10-09.2"
+        value: "2026-10-09.3"
       - key: RESAMANIA_SFTP_HOST
         sync: false
       - key: RESAMANIA_SFTP_PORT
@@ -60,7 +60,7 @@ services:
       - key: RESAMANIA_SFTP_INCLUDE_INIT
         value: "false"
       - key: RESAMANIA_SFTP_INIT_ENTITIES
-        value: "abonnements"
+        value: "abonnements,contacts"
       - key: RESAMANIA_SFTP_MAX_AGE_HOURS
         value: "48"
 
