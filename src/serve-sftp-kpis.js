@@ -39,7 +39,7 @@ async function aggregate() {
   const month = today.slice(0, 7);
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const { rows } = await store.pool.query(`
-    WITH mapped AS (
+    WITH mapped AS NOT MATERIALIZED (
       SELECT ${mappedClub} club, entity, contact_uid, payload, source_updated_at, ingested_at
       FROM resamania_sftp_records WHERE source_deleted_at IS NULL
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
@@ -150,6 +150,5 @@ const server = http.createServer(async (request, response) => {
 const port = Number(process.env.PORT || 10000);
 server.listen(port, "0.0.0.0", () => console.log(`KPI feed listening on ${port}`));
 await importLegacyHistory();
-await persistCurrentSnapshot().catch((error) => console.error(`Initial KPI snapshot pending: ${error.message}`));
 setInterval(importLegacyHistory, 15 * 60_000).unref();
 setInterval(() => persistCurrentSnapshot().catch((error) => console.error(`KPI snapshot pending: ${error.message}`)), 30 * 60_000).unref();

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS resamania_sftp_records (
   ingested_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(entity, external_uid)
 );
 CREATE INDEX IF NOT EXISTS resamania_sftp_records_club_entity_idx ON resamania_sftp_records(club_code, entity);
+CREATE INDEX IF NOT EXISTS resamania_sftp_records_entity_idx ON resamania_sftp_records(entity);
 CREATE INDEX IF NOT EXISTS resamania_sftp_records_occurred_idx ON resamania_sftp_records(entity, occurred_at DESC);
 CREATE TABLE IF NOT EXISTS club_kpi_snapshots (
   club_code text NOT NULL, club_name text NOT NULL, snapshot_date date NOT NULL,
