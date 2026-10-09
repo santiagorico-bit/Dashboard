@@ -39,31 +39,40 @@ async function aggregate() {
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const { rows } = await store.pool.query(`
     WITH mapped AS NOT MATERIALIZED (
-      SELECT ${mappedClub} club, entity, external_uid, contact_uid, payload, source_updated_at, ingested_at
+      SELECT ${mappedClub} club, entity, external_uid, contact_uid, payload, source_updated_at, source_deleted_at, ingested_at
       FROM resamania_sftp_records
-      WHERE source_deleted_at IS NULL
-        AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+      WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
+    membership_contacts AS (
+      SELECT club, contact_uid, external_uid, payload, source_updated_at, source_deleted_at, ingested_at,
+        row_number() OVER (
+          PARTITION BY club, coalesce(contact_uid, external_uid)
+          ORDER BY coalesce(payload->>'updatedAt',payload->>'createdAt','') DESC,
+            coalesce(source_updated_at,ingested_at) DESC, external_uid DESC
+        ) contact_rank
+      FROM mapped
+      WHERE entity='abonnements'
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+    ),
     memberships AS (
       SELECT club,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_month,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_today,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_yesterday,
-        count(DISTINCT contact_uid) FILTER (WHERE
-          lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','')) IN ('active','actif','running','current','en cours')
-          OR (
-            coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom','') <= $2
-            AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
-              OR coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
-          )
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') memberships_month,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%') memberships_today,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%') memberships_yesterday,
+        count(DISTINCT contact_uid) FILTER (WHERE contact_rank=1 AND source_deleted_at IS NULL AND (
+          lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','')) IN ('active','actif','running','current','en cours') OR (
+            coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
+            AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = '' OR
+              coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
+          ))
         ) active_members,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM mapped WHERE entity='abonnements' GROUP BY club
+      FROM membership_contacts GROUP BY club
     ), cancellations AS (
       SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $2 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM mapped WHERE entity='resiliations' GROUP BY club
+      FROM mapped WHERE entity='resiliations' AND source_deleted_at IS NULL GROUP BY club
     ), invoices AS (
       SELECT club,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_net,
@@ -75,17 +84,17 @@ async function aggregate() {
         count(*) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code','')) IN ('sesion','session')) day_passes,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='fianza'),0) deposits,
         max(payload->>'invoice.generatedAt') collected_through, max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM mapped WHERE entity='factures' GROUP BY club
+      FROM mapped WHERE entity='factures' AND source_deleted_at IS NULL GROUP BY club
     ), funnel AS (
       SELECT club, count(DISTINCT contact_uid) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'stateAfter',''))='prospect') visits,
         count(DISTINCT contact_uid) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'stateAfter',''))='client') conversions,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM mapped WHERE entity='contacts' GROUP BY club
+      FROM mapped WHERE entity='contacts' AND source_deleted_at IS NULL GROUP BY club
     ), accesses AS (
       SELECT club, count(DISTINCT concat(contact_uid,':',left(payload->>'createdAt',10))) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)' AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') accesses_month,
         count(DISTINCT contact_uid) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)' AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') unique_visitors_month,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM mapped WHERE entity='passages' GROUP BY club
+      FROM mapped WHERE entity='passages' AND source_deleted_at IS NULL GROUP BY club
     )
     SELECT c.club, m.*, x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
       f.visits,f.conversions,a.accesses_month,a.unique_visitors_month,
