@@ -100,7 +100,7 @@ export function createPostgresStore(connectionString = process.env.DATABASE_URL)
           SELECT $1,"externalUid","clubCode","contactUid","occurredAt","sourceUpdatedAt","sourceDeletedAt",$2,payload,now() FROM input
           ON CONFLICT(entity,external_uid) DO UPDATE SET club_code=EXCLUDED.club_code,contact_uid=EXCLUDED.contact_uid,
           occurred_at=EXCLUDED.occurred_at,source_updated_at=EXCLUDED.source_updated_at,source_deleted_at=EXCLUDED.source_deleted_at,
-          source_file_id=EXCLUDED.source_file_id,payload=EXCLUDED.payload,ingested_at=now()`,
+          source_file_id=EXCLUDED.source_file_id,payload=resamania_sftp_records.payload || EXCLUDED.payload,ingested_at=now()`,
           [body.entity, body.fileId, JSON.stringify(normalized)]);
         return { ok: true, upserted: rows.length };
       }

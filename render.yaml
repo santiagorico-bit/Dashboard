@@ -54,9 +54,11 @@ services:
           name: onair-resamania-data
           property: connectionString
       - key: RESAMANIA_SFTP_MAX_FILES
-        value: "100"
+        value: "24"
       - key: RESAMANIA_SFTP_INCLUDE_INIT
         value: "false"
+      - key: RESAMANIA_SFTP_INIT_ENTITIES
+        value: "abonnements"
       - key: RESAMANIA_SFTP_MAX_AGE_HOURS
         value: "48"
 

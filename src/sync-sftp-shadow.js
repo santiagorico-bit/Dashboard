@@ -18,6 +18,8 @@ if (!postgresStore && (!endpoint || !ingestToken)) throw new Error("Falta DATABA
 const remoteRoot = process.env.RESAMANIA_SFTP_PATH || ".";
 const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX_FILES || 12)));
 const includeInitialExports = process.env.RESAMANIA_SFTP_INCLUDE_INIT === "true";
+const initialExportEntities = new Set((process.env.RESAMANIA_SFTP_INIT_ENTITIES || "")
+  .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const maxAgeHours = Math.max(0, Number(process.env.RESAMANIA_SFTP_MAX_AGE_HOURS || 0));
 const chunkSize = 400;
 const normalizeFingerprint = (value) => value.trim().replace(/^SHA256:/, "").replace(/=+$/, "");
@@ -91,7 +93,10 @@ try {
   // the hourly job can consume the timeout before live KPIs are published.
   const listed = (await sftp.list(remoteRoot))
     .filter(isCsvFile)
-    .filter((item) => includeInitialExports || !/(?:^|[_-])init(?:[_\-.]|$)/i.test(item.name))
+    .filter((item) => {
+      const isInitial = /(?:^|[_-])init(?:[_\-.]|$)/i.test(item.name);
+      return !isInitial || includeInitialExports || initialExportEntities.has(entityFromFilename(item.name));
+    })
     .filter((item) => !maxAgeHours || Number(item.modifyTime || 0) >= Date.now() - maxAgeHours * 60 * 60 * 1000)
     .sort((a, b) => Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
   filesSeen = listed.length;
