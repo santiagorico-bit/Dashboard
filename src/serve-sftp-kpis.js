@@ -2,7 +2,6 @@ import http from "node:http";
 import { createPostgresStore } from "./sftp-postgres-store.js";
 
 const store = createPostgresStore();
-await store.initialize();
 
 const clubNames = new Map([
   ["barcelona", "Barcelona Universitat"], ["madrid", "Madrid Delicias"],
