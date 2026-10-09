@@ -43,31 +43,22 @@ async function aggregate() {
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
-    membership_contacts AS (
-      SELECT club, contact_uid, external_uid, payload, source_updated_at, source_deleted_at, ingested_at,
-        row_number() OVER (
-          PARTITION BY club, coalesce(contact_uid, external_uid)
-          ORDER BY coalesce(payload->>'updatedAt',payload->>'createdAt','') DESC,
-            coalesce(source_updated_at,ingested_at) DESC, external_uid DESC
-        ) contact_rank
-      FROM mapped
-      WHERE entity='abonnements'
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-    ),
     memberships AS (
       SELECT club,
         count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') memberships_month,
         count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%') memberships_today,
         count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%') memberships_yesterday,
-        count(DISTINCT contact_uid) FILTER (WHERE contact_rank=1 AND source_deleted_at IS NULL AND (
-          lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','')) IN ('active','actif','running','current','en cours') OR (
-            coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
-            AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = '' OR
-              coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
-          ))
-        ) active_members,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
-      FROM membership_contacts GROUP BY club
+      FROM mapped WHERE entity='abonnements'
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND payload->>'createdAt' LIKE $1 || '%'
+      GROUP BY club
+    ), active_contacts AS (
+      SELECT club, count(DISTINCT coalesce(contact_uid,external_uid)) active_members
+      FROM mapped
+      WHERE entity='contacts' AND source_deleted_at IS NULL
+        AND lower(coalesce(payload->>'stateAfter',payload->>'state',payload->>'status',''))='client'
+      GROUP BY club
     ), cancellations AS (
       SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $2 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today,
@@ -96,10 +87,10 @@ async function aggregate() {
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='passages' AND source_deleted_at IS NULL GROUP BY club
     )
-    SELECT c.club, m.*, x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
+    SELECT c.club, m.*, ac.active_members, x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
       f.visits,f.conversions,a.accesses_month,a.unique_visitors_month,
       greatest(m.ingested_at,x.ingested_at,i.ingested_at,f.ingested_at,a.ingested_at) collected_at
-    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
+    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_contacts ac USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
   `, [month, today, yesterday]);
 
   return rows.map((row) => {
