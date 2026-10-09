@@ -22,6 +22,9 @@ const initialExportEntities = new Set((process.env.RESAMANIA_SFTP_INIT_ENTITIES 
   .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const maxAgeHours = Math.max(0, Number(process.env.RESAMANIA_SFTP_MAX_AGE_HOURS || 0));
 const chunkSize = 400;
+const isInitialExport = (filename) => /(?:^|[_-])init\d*(?:[_\-.]|$)/i.test(filename);
+const isPrioritizedInitialExport = (filename) => isInitialExport(filename)
+  && initialExportEntities.has(entityFromFilename(filename));
 const normalizeFingerprint = (value) => value.trim().replace(/^SHA256:/, "").replace(/=+$/, "");
 const trustedHostFingerprints = new Set(process.env.RESAMANIA_SFTP_HOST_FINGERPRINT.split(",").map(normalizeFingerprint));
 const verifyHostKey = (key) => {
@@ -94,11 +97,17 @@ try {
   const listed = (await sftp.list(remoteRoot))
     .filter(isCsvFile)
     .filter((item) => {
-      const isInitial = /(?:^|[_-])init\d*(?:[_\-.]|$)/i.test(item.name);
+      const isInitial = isInitialExport(item.name);
       return !isInitial || includeInitialExports || initialExportEntities.has(entityFromFilename(item.name));
     })
     .filter((item) => !maxAgeHours || Number(item.modifyTime || 0) >= Date.now() - maxAgeHours * 60 * 60 * 1000)
-    .sort((a, b) => Number(b.modifyTime || 0) - Number(a.modifyTime || 0));
+    .sort((a, b) => {
+      // Explicitly requested INIT entities seed authoritative state (for
+      // example active memberships). Process them before deltas so the
+      // bounded hourly budget cannot starve the base dataset.
+      const priority = Number(isPrioritizedInitialExport(b.name)) - Number(isPrioritizedInitialExport(a.name));
+      return priority || Number(b.modifyTime || 0) - Number(a.modifyTime || 0);
+    });
   filesSeen = listed.length;
   for (const item of listed) {
     if (filesProcessed >= maxFiles) break;
