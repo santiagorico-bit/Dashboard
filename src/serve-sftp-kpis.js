@@ -123,8 +123,7 @@ const server = http.createServer(async (request, response) => {
   response.setHeader("content-type", "application/json; charset=utf-8");
   try {
     if (request.method === "GET" && request.url?.split("?")[0] === "/health") {
-      const { rows } = await store.pool.query("SELECT count(*)::int records, max(ingested_at) last_ingest FROM resamania_sftp_records");
-      response.end(JSON.stringify({ ok: true, ...rows[0] })); return;
+      response.end(JSON.stringify({ ok: true, service: "onair-kpi-feed", at: new Date().toISOString() })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-states") {
       const { rows } = await store.pool.query(`SELECT coalesce(payload->>'state',payload->>'status',payload->>'membership.state','(vacío)') state,count(*)::int
