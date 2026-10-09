@@ -40,7 +40,9 @@ async function aggregate() {
   const { rows } = await store.pool.query(`
     WITH mapped AS NOT MATERIALIZED (
       SELECT ${mappedClub} club, entity, contact_uid, payload, source_updated_at, ingested_at
-      FROM resamania_sftp_records WHERE source_deleted_at IS NULL
+      FROM resamania_sftp_records
+      WHERE source_deleted_at IS NULL
+        AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
     memberships AS (
       SELECT club,
@@ -127,7 +129,9 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-states") {
       const { rows } = await store.pool.query(`SELECT coalesce(payload->>'state',payload->>'status',payload->>'membership.state','(vacío)') state,count(*)::int
-        FROM resamania_sftp_records WHERE entity='abonnements' GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
+        FROM resamania_sftp_records
+        WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
       response.end(JSON.stringify({ states: rows })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
