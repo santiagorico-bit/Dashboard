@@ -100,7 +100,9 @@ try {
       const isInitial = isInitialExport(item.name);
       return !isInitial || includeInitialExports || initialExportEntities.has(entityFromFilename(item.name));
     })
-    .filter((item) => !maxAgeHours || Number(item.modifyTime || 0) >= Date.now() - maxAgeHours * 60 * 60 * 1000)
+    .filter((item) => isPrioritizedInitialExport(item.name)
+      || !maxAgeHours
+      || Number(item.modifyTime || 0) >= Date.now() - maxAgeHours * 60 * 60 * 1000)
     .sort((a, b) => {
       // Explicitly requested INIT entities seed authoritative state (for
       // example active memberships). Process them before deltas so the
