@@ -18,7 +18,7 @@ async function importLegacyHistory() {
   const endpoint = process.env.LEGACY_KPI_FEED_URL;
   if (!endpoint) return;
   try {
-    const response = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}history=1`, { signal: AbortSignal.timeout(20_000), cache: "no-store" });
+    const response = await fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}history=1`, { signal: AbortSignal.timeout(120_000), cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const clubs = (await response.json()).clubs ?? [];
     for (const row of clubs) {
@@ -189,15 +189,15 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-counts") {
       const month = madridDate().slice(0, 7);
-      const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+      const { rows } = await store.pool.query(`SELECT club_code, ${mappedClub} club,
         count(*) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') created_rows,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%') created_contacts,
         count(*) FILTER (WHERE payload->>'startedAt' LIKE $1 || '%') started_rows,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE payload->>'startedAt' LIKE $1 || '%') started_contacts
         FROM resamania_sftp_records
-        WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        WHERE entity='abonnements'
           AND lower(coalesce(payload->>'product.code','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-        GROUP BY 1 ORDER BY 1`, [month]);
+        GROUP BY 1,2 ORDER BY 1`, [month]);
       response.end(JSON.stringify({ month, clubs: rows })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
