@@ -120,6 +120,14 @@ async function persistCurrentSnapshot() {
     [row.club_code, row.club_name, row.snapshot_date, row.collected_at, row.source, row.metrics]);
 }
 
+async function latestSnapshots() {
+  const { rows } = await store.pool.query(`SELECT DISTINCT ON (club_code)
+    club_code,club_name,snapshot_date::text,collected_at,source,metrics
+    FROM club_kpi_snapshots
+    ORDER BY club_code,snapshot_date DESC,collected_at DESC`);
+  return rows;
+}
+
 const server = http.createServer(async (request, response) => {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("content-type", "application/json; charset=utf-8");
@@ -136,7 +144,8 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
-      const current = await aggregate();
+      let current = await latestSnapshots();
+      if (!current.length) current = await aggregate();
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
       const { rows: history } = await store.pool.query(`SELECT club_code,club_name,snapshot_date::text,collected_at,source,metrics
