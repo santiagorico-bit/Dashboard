@@ -39,17 +39,24 @@ async function aggregate() {
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const { rows } = await store.pool.query(`
     WITH mapped AS NOT MATERIALIZED (
-      SELECT ${mappedClub} club, entity, contact_uid, payload, source_updated_at, ingested_at
+      SELECT ${mappedClub} club, entity, external_uid, contact_uid, payload, source_updated_at, ingested_at
       FROM resamania_sftp_records
       WHERE source_deleted_at IS NULL
         AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
     memberships AS (
       SELECT club,
-        count(*) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_month,
-        count(*) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%' AND lower(coalesce(payload->>'product.code','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_today,
-        count(*) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%' AND lower(coalesce(payload->>'product.code','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_yesterday,
-        count(DISTINCT contact_uid) FILTER (WHERE lower(coalesce(payload->>'state',payload->>'status','')) IN ('active','actif','running','current','en cours')) active_members,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_month,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $2 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_today,
+        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE payload->>'createdAt' LIKE $3 || '%' AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)') memberships_yesterday,
+        count(DISTINCT contact_uid) FILTER (WHERE
+          lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','')) IN ('active','actif','running','current','en cours')
+          OR (
+            coalesce(payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom','') <= $2
+            AND (coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
+              OR coalesce(payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
+          )
+        ) active_members,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='abonnements' GROUP BY club
     ), cancellations AS (

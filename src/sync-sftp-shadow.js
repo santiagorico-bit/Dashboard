@@ -22,6 +22,7 @@ const initialExportEntities = new Set((process.env.RESAMANIA_SFTP_INIT_ENTITIES 
   .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const maxAgeHours = Math.max(0, Number(process.env.RESAMANIA_SFTP_MAX_AGE_HOURS || 0));
 const chunkSize = 400;
+const initialExportSchemaVersion = "2";
 const isInitialExport = (filename) => /(?:^|[_-])init\d*(?:[_\-.]|$)/i.test(filename);
 const isPrioritizedInitialExport = (filename) => isInitialExport(filename)
   && initialExportEntities.has(entityFromFilename(filename));
@@ -123,13 +124,17 @@ try {
     // precision. Treat timestamps within one second as the same file so an
     // unchanged delta is not needlessly downloaded and replayed every hour.
     const sameModifiedAt = remoteModifiedAt > 0 && knownModifiedAt > 0 && Math.abs(remoteModifiedAt - knownModifiedAt) < 1000;
-    if (known && Number(known.remote_size) === Number(item.size || 0) && sameModifiedAt) continue;
+    const prioritizedInitial = isPrioritizedInitialExport(item.name);
+    if (!prioritizedInitial && known && Number(known.remote_size) === Number(item.size || 0) && sameModifiedAt) continue;
     const localPath = join(tempDirectory, basename(item.name));
     const entity = entityFromFilename(item.name);
     let fileId;
     try {
       await sftp.fastGet(remotePath, localPath);
-      const sha256 = await sha256File(localPath);
+      const sourceSha256 = await sha256File(localPath);
+      const sha256 = prioritizedInitial
+        ? createHash("sha256").update(`${sourceSha256}:schema-v${initialExportSchemaVersion}`).digest("hex")
+        : sourceSha256;
       const begun = await ingest("file_begin", { runId, entity, sha256, filename: item.name, remotePath, remoteSize: Number(item.size || 0), remoteModifiedAt: item.modifyTime ? new Date(item.modifyTime).toISOString() : null });
       fileId = begun.fileId;
       if (begun.skip) continue;

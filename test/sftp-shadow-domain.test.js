@@ -20,3 +20,14 @@ test("drops PII before transmission", () => {
   const payload = safePayload({ uid: "1", email: "secret@example.com", phone: "600000000", clubName: "Madrid Delicias", productName: "Essential" });
   assert.deepEqual(payload, { uid: "1", clubName: "Madrid Delicias", productName: "Essential" });
 });
+
+test("keeps non-personal membership validity fields", () => {
+  const payload = safePayload({
+    uid: "sub-1", startAt: "2026-01-01", endAt: "2026-12-31",
+    terminationDate: "", valid: "true", firstName: "Private",
+  });
+  assert.deepEqual(payload, {
+    uid: "sub-1", startAt: "2026-01-01", endAt: "2026-12-31",
+    terminationDate: "", valid: "true",
+  });
+});

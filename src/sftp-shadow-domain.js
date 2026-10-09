@@ -25,7 +25,7 @@ const first = (row, candidates) => candidates.map((key) => row[key]).find((value
 
 export function safePayload(record) {
   const denied = /(email|mail|phone|telephone|mobile|address|adresse|postal|zipcode|firstname|lastname|surname|birth|birthday|iban|bic|mandate|password)/i;
-  const allowed = /(uid|state|status|club|membership|abonnement|product|produit|article|family|famille|billing|rhythm|date|time|created|updated|deleted|authorized|crossing|point|passage|type|zone|reason|motif|invoice|facture|reference|channel|quantity|quantite|price|prix|tax|tva|financial|source|goal|objectif|salesperson|commercial|amount|montant|payment|paiement)/i;
+  const allowed = /(uid|state|status|club|membership|abonnement|product|produit|article|family|famille|billing|rhythm|date|time|created|updated|deleted|authorized|crossing|point|passage|type|zone|reason|motif|invoice|facture|reference|channel|quantity|quantite|price|prix|tax|tva|financial|source|goal|objectif|salesperson|commercial|amount|montant|payment|paiement|start|begin|debut|valid|effective|end|fin|term|cancel|resili|period)/i;
   return Object.fromEntries(Object.entries(record).filter(([key]) => allowed.test(key) && !denied.test(key)));
 }
 
