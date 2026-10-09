@@ -86,18 +86,22 @@ export function createPostgresStore(connectionString = process.env.DATABASE_URL)
       }
       if (action === "upsert_chunk") {
         const rows = Array.isArray(body.rows) ? body.rows : [];
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          for (const row of rows) await client.query(`INSERT INTO resamania_sftp_records
-            (entity,external_uid,club_code,contact_uid,occurred_at,source_updated_at,source_deleted_at,source_file_id,payload,ingested_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) ON CONFLICT(entity,external_uid) DO UPDATE SET
-            club_code=EXCLUDED.club_code,contact_uid=EXCLUDED.contact_uid,occurred_at=EXCLUDED.occurred_at,
-            source_updated_at=EXCLUDED.source_updated_at,source_deleted_at=EXCLUDED.source_deleted_at,
-            source_file_id=EXCLUDED.source_file_id,payload=EXCLUDED.payload,ingested_at=now()`,
-            [body.entity, text(row.externalUid, 300), text(row.clubCode, 80), text(row.contactUid, 300), timestamp(row.occurredAt), timestamp(row.sourceUpdatedAt), timestamp(row.sourceDeletedAt), body.fileId, row.payload ?? {}]);
-          await client.query("COMMIT");
-        } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+        const normalized = rows.map((row) => ({
+          externalUid: text(row.externalUid, 300), clubCode: text(row.clubCode, 80), contactUid: text(row.contactUid, 300),
+          occurredAt: timestamp(row.occurredAt), sourceUpdatedAt: timestamp(row.sourceUpdatedAt), sourceDeletedAt: timestamp(row.sourceDeletedAt),
+          payload: row.payload ?? {},
+        }));
+        await query(`WITH input AS (
+          SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(
+            "externalUid" text,"clubCode" text,"contactUid" text,"occurredAt" timestamptz,
+            "sourceUpdatedAt" timestamptz,"sourceDeletedAt" timestamptz,payload jsonb)
+        ) INSERT INTO resamania_sftp_records
+          (entity,external_uid,club_code,contact_uid,occurred_at,source_updated_at,source_deleted_at,source_file_id,payload,ingested_at)
+          SELECT $1,"externalUid","clubCode","contactUid","occurredAt","sourceUpdatedAt","sourceDeletedAt",$2,payload,now() FROM input
+          ON CONFLICT(entity,external_uid) DO UPDATE SET club_code=EXCLUDED.club_code,contact_uid=EXCLUDED.contact_uid,
+          occurred_at=EXCLUDED.occurred_at,source_updated_at=EXCLUDED.source_updated_at,source_deleted_at=EXCLUDED.source_deleted_at,
+          source_file_id=EXCLUDED.source_file_id,payload=EXCLUDED.payload,ingested_at=now()`,
+          [body.entity, body.fileId, JSON.stringify(normalized)]);
         return { ok: true, upserted: rows.length };
       }
       if (action === "file_complete" || action === "file_fail") {
