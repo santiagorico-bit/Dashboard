@@ -127,6 +127,11 @@ const server = http.createServer(async (request, response) => {
       const { rows } = await store.pool.query("SELECT count(*)::int records, max(ingested_at) last_ingest FROM resamania_sftp_records");
       response.end(JSON.stringify({ ok: true, ...rows[0] })); return;
     }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-states") {
+      const { rows } = await store.pool.query(`SELECT coalesce(payload->>'state',payload->>'status',payload->>'membership.state','(vacío)') state,count(*)::int
+        FROM resamania_sftp_records WHERE entity='abonnements' GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
+      response.end(JSON.stringify({ states: rows })); return;
+    }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
       const current = await aggregate();
