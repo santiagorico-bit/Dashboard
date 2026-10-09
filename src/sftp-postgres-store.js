@@ -42,7 +42,19 @@ const timestamp = (value) => {
 export function createPostgresStore(connectionString = process.env.DATABASE_URL) {
   const pool = new Pool({ connectionString, ssl: connectionString?.includes("localhost") ? false : { rejectUnauthorized: false }, max: 4 });
   let ready;
-  const initialize = () => ready ??= pool.query(schema);
+  const initialize = () => ready ??= (async () => {
+    let lastError;
+    for (let attempt = 1; attempt <= 30; attempt += 1) {
+      try {
+        await pool.query(schema);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 30) await new Promise((resolve) => setTimeout(resolve, Math.min(10_000, attempt * 1000)));
+      }
+    }
+    throw lastError;
+  })();
   const query = async (...args) => { await initialize(); return pool.query(...args); };
 
   return {
