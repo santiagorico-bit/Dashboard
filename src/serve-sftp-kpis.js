@@ -20,12 +20,14 @@ const number = (value) => Number(value ?? 0);
 // subsequent SFTP changes. From November onwards SFTP covers the full month.
 const cutoverBaselines = {
   "2026-10": {
-    from: "2026-10-06",
+    // Verified close shown in the production dashboard on October 8 at 23:26.
+    membershipFrom: "2026-10-09",
+    activeFrom: "2026-10-06",
     clubs: {
-      madrid: { memberships: 87, members: 3764 },
-      "les-arts": { memberships: 89, members: 3239 },
-      "nuevo-centro": { memberships: 60, members: 2853 },
-      ruzafa: { memberships: 80, members: 3700 },
+      madrid: { memberships: 176, members: 3764 },
+      "les-arts": { memberships: 226, members: 3239 },
+      "nuevo-centro": { memberships: 118, members: 2853 },
+      ruzafa: { memberships: 139, members: 3700 },
     },
   },
 };
@@ -83,9 +85,24 @@ async function aggregate() {
       SELECT club,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
           WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4
+            AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2
         ) starts,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
           WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $4
+            AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
+        ) ends
+      FROM mapped
+      WHERE entity='abonnements'
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+      GROUP BY club
+    ), active_cutover AS (
+      SELECT club,
+        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+          WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $5
+            AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2
+        ) starts,
+        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+          WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $5
             AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
         ) ends
       FROM mapped
@@ -120,11 +137,11 @@ async function aggregate() {
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='passages' AND source_deleted_at IS NULL GROUP BY club
     )
-    SELECT c.club, m.*, ac.active_members, pc.starts post_cutover_starts,pc.ends post_cutover_ends,x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
+    SELECT c.club, m.*, ac.active_members, pc.starts post_cutover_starts,pc.ends post_cutover_ends,acut.starts active_cutover_starts,acut.ends active_cutover_ends,x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
       f.visits,f.conversions,a.accesses_month,a.unique_visitors_month,
       greatest(m.ingested_at,x.ingested_at,i.ingested_at,f.ingested_at,a.ingested_at) collected_at
-    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_memberships ac USING(club) LEFT JOIN post_cutover pc USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
-  `, [month, today, yesterday, cutoverBaselines[month]?.from ?? `${month}-01`]);
+    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_memberships ac USING(club) LEFT JOIN post_cutover pc USING(club) LEFT JOIN active_cutover acut USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
+  `, [month, today, yesterday, cutoverBaselines[month]?.membershipFrom ?? `${month}-01`, cutoverBaselines[month]?.activeFrom ?? `${month}-01`]);
 
   return rows.map((row) => {
     const baseline = cutoverBaselines[month]?.clubs[row.club];
@@ -135,7 +152,7 @@ async function aggregate() {
     const visits = number(row.visits);
     const conversions = number(row.conversions) || memberships;
     const activeMembers = baseline
-      ? baseline.members + number(row.post_cutover_starts) - number(row.post_cutover_ends)
+      ? baseline.members + number(row.active_cutover_starts) - number(row.active_cutover_ends)
       : number(row.active_members);
     const accesses = number(row.accesses_month);
     const uniqueVisitors = number(row.unique_visitors_month);
@@ -147,7 +164,7 @@ async function aggregate() {
       metrics: {
         today: { memberships: number(row.memberships_today), cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
         yesterday: { memberships: number(row.memberships_yesterday) },
-        monthToDate: { memberships, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing: number(row.billing_net), merch: number(row.merch), supplements: number(row.supplements), ties: 0, dayPasses: number(row.day_passes), memberCountBasis: baseline ? "resamania-close-plus-sftp-incremental" : "resamania-sftp", memberBaseline: baseline?.members, memberBaselineThrough: baseline ? "2026-10-05" : null, memberIntradayAdditions: baseline ? number(row.post_cutover_starts) - number(row.post_cutover_ends) : 0, membershipTariffs: [], churnHistory: [] },
+        monthToDate: { memberships, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing: number(row.billing_net), merch: number(row.merch), supplements: number(row.supplements), ties: 0, dayPasses: number(row.day_passes), memberCountBasis: baseline ? "resamania-close-plus-sftp-incremental" : "resamania-sftp", memberBaseline: baseline?.members, memberBaselineThrough: baseline ? "2026-10-05" : null, membershipBaselineThrough: baseline ? "2026-10-08" : null, memberIntradayAdditions: baseline ? number(row.active_cutover_starts) - number(row.active_cutover_ends) : 0, membershipTariffs: [], churnHistory: [] },
         incidences: { accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
         salesFunnel: { visits, conversions, conversionRate: visits ? conversions / visits * 100 : 0, spontaneousSales: 0 },
         membershipSources: [],
