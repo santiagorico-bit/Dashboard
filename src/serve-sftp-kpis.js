@@ -340,16 +340,29 @@ async function loadLiveAccessRows() {
   if (liveAccessRefresh) return liveAccessRefresh;
   liveAccessRefresh = (async () => {
     const month = madridDate().slice(0, 7);
-    const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
-      count(DISTINCT external_uid)::int accesses_month,
-      count(DISTINCT contact_uid)::int unique_visitors_month
+    const { rows } = await store.pool.query(`WITH passage_counts AS (
+      SELECT ${mappedClub} club,contact_uid,count(DISTINCT external_uid)::int accesses
       FROM resamania_sftp_records
       WHERE entity='passages' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND payload->>'createdAt' LIKE $1 || '%'
         AND lower(coalesce(payload->>'entryAuthorized','false'))='true'
         AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
         AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
-      GROUP BY club`, [month]);
+      GROUP BY 1,2
+    ), access_totals AS (
+      SELECT club,sum(accesses)::int accesses_month,count(*)::int unique_visitors_month FROM passage_counts GROUP BY club
+    ), cancellation_contacts AS (
+      SELECT ${mappedClub} club,contact_uid
+      FROM resamania_sftp_records
+      WHERE entity='resiliations' AND source_deleted_at IS NULL
+        AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        AND payload->>'cancellationDate' LIKE $1 || '%'
+        AND lower(coalesce(payload->>'state','accepted'))='accepted'
+      GROUP BY 1,2
+    ), cancellation_accesses AS (
+      SELECT c.club,avg(coalesce(p.accesses,0)) average_cancellation_accesses
+      FROM cancellation_contacts c LEFT JOIN passage_counts p USING(club,contact_uid) GROUP BY c.club
+    ) SELECT a.*,c.average_cancellation_accesses FROM access_totals a LEFT JOIN cancellation_accesses c USING(club)`, [month]);
     liveAccessCache = { at: Date.now(), rows };
     return rows;
   })().catch((error) => {
@@ -385,9 +398,10 @@ async function withLiveBusiness(snapshots) {
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
     const uniqueVisitors = accessRow ? number(accessRow.unique_visitors_month) : number(snapshot.metrics?.incidences?.uniqueVisitorsMonth);
+    const cancellationAverageAccesses = accessRow ? number(accessRow.average_cancellation_accesses) : null;
     const cancellationSeries = [...historicChurn(snapshot.club_code), {
       month, cancellations, openingMembers: baseline.members,
-      rate: baseline.members ? cancellations / baseline.members * 100 : 0,
+      rate: baseline.members ? cancellations / baseline.members * 100 : 0, averageAccesses: cancellationAverageAccesses,
     }];
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
@@ -398,7 +412,7 @@ async function withLiveBusiness(snapshots) {
           taxBasis: "Cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
       retention: {
         active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
-        cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: null })) },
+        cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
       },
     } };
   });
