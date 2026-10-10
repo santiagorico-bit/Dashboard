@@ -262,10 +262,10 @@ const server = http.createServer(async (request, response) => {
         WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
           AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
       ), dates AS (
-        SELECT club, created_date day, 'createdAt' field, count(DISTINCT membership)::int total FROM eligible WHERE created_date LIKE $1 || '%' GROUP BY 1,2
+        SELECT club, created_date event_date, 'createdAt' field, count(DISTINCT membership)::int total FROM eligible WHERE created_date LIKE $1 || '%' GROUP BY 1,2
         UNION ALL SELECT club, started_date, 'startedAt', count(DISTINCT membership)::int FROM eligible WHERE started_date LIKE $1 || '%' GROUP BY 1,2
         UNION ALL SELECT club, valid_from_date, 'validFrom', count(DISTINCT membership)::int FROM eligible WHERE valid_from_date LIKE $1 || '%' GROUP BY 1,2
-      ) SELECT * FROM dates ORDER BY club,field,day`, [month]);
+      ) SELECT * FROM dates ORDER BY club,field,event_date`, [month]);
       response.end(JSON.stringify({ month, clubs: rows })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
