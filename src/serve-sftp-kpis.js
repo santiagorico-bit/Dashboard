@@ -24,10 +24,14 @@ const cutoverBaselines = {
     membershipFrom: "2026-10-09",
     activeFrom: "2026-10-06",
     clubs: {
-      madrid: { memberships: 176, members: 3764 },
-      "les-arts": { memberships: 226, members: 3239 },
-      "nuevo-centro": { memberships: 118, members: 2853 },
-      ruzafa: { memberships: 139, members: 3700 },
+      madrid: { memberships: 176, members: 3764, businessThrough: "2026-10-07", billing: 70240.56, cancellations: 87,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 60 }, { tariff: "ON AIR Original", memberships: 30 }, { tariff: "ON AIR Original Web", memberships: 17 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 3 }, { tariff: "ON AIR Ultra Web", memberships: 1 }] },
+      "les-arts": { memberships: 226, members: 3239, businessThrough: "2026-10-07", billing: 41517.38, cancellations: 54,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 59 }, { tariff: "ON AIR Original", memberships: 45 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "ON AIR Original Web", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 4 }, { tariff: "Abono 2 Meses", memberships: 1 }, { tariff: "Abono 3 Meses", memberships: 1 }] },
+      "nuevo-centro": { memberships: 118, members: 2853, businessThrough: "2026-10-05", billing: 18167.68, cancellations: 51,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 26 }, { tariff: "ON AIR Original", memberships: 16 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "Abono 1 Mes", memberships: 2 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Original Web", memberships: 1 }] },
+      ruzafa: { memberships: 139, members: 3700, businessThrough: "2026-10-05", billing: 28103.99, cancellations: 52,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 33 }, { tariff: "ON AIR Original", memberships: 19 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Original Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 2 }] },
     },
   },
 };
@@ -211,6 +215,8 @@ async function latestSnapshots() {
 
 let liveMembershipCache = null;
 let liveMembershipRefresh = null;
+let liveBusinessCache = null;
+let liveBusinessRefresh = null;
 
 async function loadLiveMembershipRows() {
   if (liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
@@ -254,6 +260,80 @@ async function withLiveMemberships(snapshots) {
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
         memberCountBasis: baseline ? "resamania-close-plus-sftp-incremental" : "resamania-sftp",
         membershipBaselineThrough: baseline ? "2026-10-08" : null },
+    } };
+  });
+}
+
+async function loadLiveBusinessRows() {
+  if (liveBusinessCache && Date.now() - liveBusinessCache.at < 5 * 60_000) return liveBusinessCache.rows;
+  if (liveBusinessRefresh) return liveBusinessRefresh;
+  liveBusinessRefresh = (async () => {
+    const today = madridDate();
+    const month = today.slice(0, 7);
+    const { rows } = await store.pool.query(`WITH mapped AS NOT MATERIALIZED (
+      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
+      FROM resamania_sftp_records
+      WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        AND entity IN ('factures','resiliations','passages','abonnements')
+    ), totals AS (
+      SELECT club,
+        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+          FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
+            AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
+            AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_increment,
+        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+          FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
+        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+          FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
+            AND left(payload->>'cancellationDate',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
+            AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_increment,
+        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+          FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today,
+        count(DISTINCT external_uid) FILTER (WHERE entity='passages' AND payload->>'createdAt' LIKE $1 || '%'
+          AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
+          AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') accesses_month,
+        count(DISTINCT contact_uid) FILTER (WHERE entity='passages' AND payload->>'createdAt' LIKE $1 || '%'
+          AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
+          AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') unique_visitors_month
+      FROM mapped GROUP BY club
+    ), tariff_rows AS (
+      SELECT club,coalesce(nullif(payload->>'product.name',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),'Sin cuota clasificada') tariff,
+        count(DISTINCT coalesce(contact_uid,external_uid))::int memberships
+      FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+      GROUP BY club,2
+    ), tariffs AS (
+      SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
+      FROM tariff_rows GROUP BY club
+    ) SELECT t.*,f.membership_tariffs FROM totals t LEFT JOIN tariffs f USING(club)`, [month, today]);
+    liveBusinessCache = { at: Date.now(), rows };
+    return rows;
+  })().finally(() => { liveBusinessRefresh = null; });
+  return liveBusinessRefresh;
+}
+
+async function withLiveBusiness(snapshots) {
+  const month = madridDate().slice(0, 7);
+  const rows = await loadLiveBusinessRows();
+  const live = new Map(rows.map((row) => [row.club, row]));
+  return snapshots.map((snapshot) => {
+    const row = live.get(snapshot.club_code);
+    const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
+    if (!row || !baseline?.businessThrough) return snapshot;
+    const memberships = number(snapshot.metrics?.monthToDate?.memberships);
+    const tariffs = Array.isArray(row.membership_tariffs) ? row.membership_tariffs.map((item) => ({ ...item })) : [];
+    const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
+    if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
+    const cancellations = baseline.cancellations + number(row.cancellations_increment);
+    const billing = baseline.billing + number(row.billing_increment);
+    const activeMembers = number(snapshot.metrics?.monthToDate?.members);
+    const accesses = number(row.accesses_month);
+    const uniqueVisitors = number(row.unique_visitors_month);
+    return { ...snapshot, metrics: { ...snapshot.metrics,
+      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
+      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs },
+      incidences: { ...snapshot.metrics?.incidences, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
+      retention: { active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] } },
     } };
   });
 }
@@ -313,7 +393,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
-      const current = await withLiveMemberships(await latestSnapshots());
+      const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshots()));
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
       const { rows: history } = await store.pool.query(`SELECT club_code,club_name,snapshot_date::text,collected_at,source,metrics
