@@ -304,7 +304,10 @@ async function loadLiveBusinessRows() {
     ) SELECT t.*,f.membership_tariffs FROM totals t LEFT JOIN tariffs f USING(club)`, [month, today]);
     liveBusinessCache = { at: Date.now(), rows };
     return rows;
-  })().finally(() => { liveBusinessRefresh = null; });
+  })().catch((error) => {
+    console.error(`Live business rollup pending: ${error.message}`);
+    return liveBusinessCache?.rows ?? [];
+  }).finally(() => { liveBusinessRefresh = null; });
   return liveBusinessRefresh;
 }
 
@@ -334,16 +337,17 @@ async function loadLiveAccessRows() {
 
 async function withLiveBusiness(snapshots) {
   const month = madridDate().slice(0, 7);
-  const rows = await loadLiveBusinessRows();
-  const live = new Map(rows.map((row) => [row.club, row]));
+  void loadLiveBusinessRows();
+  const live = new Map((liveBusinessCache?.rows ?? []).map((row) => [row.club, row]));
   void loadLiveAccessRows();
   const liveAccess = new Map((liveAccessCache?.rows ?? []).map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
-    const row = live.get(snapshot.club_code);
+    const row = live.get(snapshot.club_code) ?? {};
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
-    if (!row || !baseline?.businessThrough) return snapshot;
+    if (!baseline?.businessThrough) return snapshot;
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
-    const tariffs = Array.isArray(row.membership_tariffs) ? row.membership_tariffs.map((item) => ({ ...item })) : [];
+    const tariffs = (Array.isArray(row.membership_tariffs) ? row.membership_tariffs : baseline.tariffs ?? [])
+      .map((item) => ({ ...item }));
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
