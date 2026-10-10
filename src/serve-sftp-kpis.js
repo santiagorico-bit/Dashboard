@@ -209,14 +209,20 @@ async function latestSnapshots() {
   return rows;
 }
 
-async function withLiveMemberships(snapshots) {
+let liveMembershipCache = null;
+let liveMembershipRefresh = null;
+
+async function loadLiveMembershipRows() {
+  if (liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
+  if (liveMembershipRefresh) return liveMembershipRefresh;
+  liveMembershipRefresh = (async () => {
   const today = madridDate();
   const month = today.slice(0, 7);
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const baselineConfig = cutoverBaselines[month];
   const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
   const activeFrom = baselineConfig?.activeFrom ?? `${month}-01`;
-  const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+    const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
@@ -230,7 +236,18 @@ async function withLiveMemberships(snapshots) {
     FROM resamania_sftp_records
     WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
       AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-    GROUP BY club`, [month, today, yesterday, membershipFrom, activeFrom]);
+      GROUP BY club`, [month, today, yesterday, membershipFrom, activeFrom]);
+    liveMembershipCache = { at: Date.now(), rows };
+    return rows;
+  })().finally(() => { liveMembershipRefresh = null; });
+  return liveMembershipRefresh;
+}
+
+async function withLiveMemberships(snapshots) {
+  const today = madridDate();
+  const month = today.slice(0, 7);
+  const baselineConfig = cutoverBaselines[month];
+  const rows = await loadLiveMembershipRows();
   const live = new Map(rows.map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
