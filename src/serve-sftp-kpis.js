@@ -14,6 +14,14 @@ const mappedClub = `CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OMD' THEN '
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
 
+const churnHistory = {
+  madrid: [["2026-04",4.92,78,1585],["2026-05",4.97,113,2273],["2026-06",7.55,200,2649],["2026-07",7.79,224,2874],["2026-08",7.82,230,2940],["2026-09",7.39,235,3179]],
+  "les-arts": [["2025-11",7.35,161,2189],["2025-12",9.5,218,2295],["2026-01",10.8,250,2315],["2026-02",10.23,259,2532],["2026-03",9.77,256,2619],["2026-04",9.76,257,2634],["2026-05",9.9,268,2707],["2026-06",13.04,351,2692],["2026-07",9.69,254,2620],["2026-08",10.3,266,2583],["2026-09",8.55,221,2586]],
+  "nuevo-centro": [["2025-11",11.65,357,3065],["2025-12",12.24,366,2991],["2026-01",11,316,2874],["2026-02",11.27,337,2989],["2026-03",10.88,329,3023],["2026-04",11.97,353,2949],["2026-05",9.66,279,2889],["2026-06",12.98,369,2842],["2026-07",11.86,318,2682],["2026-08",9.96,252,2531],["2026-09",9.12,228,2501]],
+  ruzafa: [["2025-11",10.69,372,3480],["2025-12",11.3,389,3441],["2026-01",10.78,356,3302],["2026-02",9.69,337,3478],["2026-03",10.13,362,3575],["2026-04",11.5,406,3530],["2026-05",11.59,410,3537],["2026-06",14.27,497,3484],["2026-07",12.99,441,3394],["2026-08",11.07,357,3225],["2026-09",10.4,336,3232]],
+};
+const historicChurn = (club) => (churnHistory[club] ?? []).map(([month,rate,cancellations,openingMembers]) => ({ month,rate,cancellations,openingMembers }));
+
 // The SFTP feed started during October. Its INIT export contains the current
 // membership state, not every sale that happened earlier in the month. Keep
 // the last complete Resamania close as the cut-over baseline and apply only
@@ -296,6 +304,7 @@ async function loadLiveBusinessRows() {
       SELECT club,coalesce(nullif(payload->>'product.name',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),'Sin cuota clasificada') tariff,
         count(DISTINCT coalesce(contact_uid,external_uid))::int memberships
       FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
+        AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
       GROUP BY club,2
     ), tariffs AS (
@@ -346,8 +355,12 @@ async function withLiveBusiness(snapshots) {
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
     if (!baseline?.businessThrough) return snapshot;
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
-    const tariffs = (Array.isArray(row.membership_tariffs) ? row.membership_tariffs : baseline.tariffs ?? [])
-      .map((item) => ({ ...item }));
+    const tariffCounts = new Map();
+    for (const item of [...(baseline.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
+      const tariff = String(item.tariff || "Sin cuota clasificada");
+      tariffCounts.set(tariff, (tariffCounts.get(tariff) ?? 0) + number(item.memberships));
+    }
+    const tariffs = [...tariffCounts].map(([tariff, memberships]) => ({ tariff, memberships })).sort((a,b) => b.memberships - a.memberships);
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
@@ -358,8 +371,8 @@ async function withLiveBusiness(snapshots) {
     const uniqueVisitors = accessRow ? number(accessRow.unique_visitors_month) : number(snapshot.metrics?.incidences?.uniqueVisitorsMonth);
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs },
-      incidences: { ...snapshot.metrics?.incidences, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
+      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs, churnHistory: historicChurn(snapshot.club_code) },
+      incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
           taxBasis: "Cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
