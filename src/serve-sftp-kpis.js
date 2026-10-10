@@ -236,8 +236,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
-      let current = await latestSnapshots();
-      if (!current.length) current = await aggregate();
+      // The live feed must reflect the records already ingested from SFTP.
+      // Persisted snapshots are historical checkpoints and can lag behind a
+      // completed sync (or a newly deployed aggregation rule).
+      const current = await aggregate();
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
       const { rows: history } = await store.pool.query(`SELECT club_code,club_name,snapshot_date::text,collected_at,source,metrics
