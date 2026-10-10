@@ -217,6 +217,8 @@ let liveMembershipCache = null;
 let liveMembershipRefresh = null;
 let liveBusinessCache = null;
 let liveBusinessRefresh = null;
+let liveAccessCache = null;
+let liveAccessRefresh = null;
 
 async function loadLiveMembershipRows() {
   if (liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
@@ -274,7 +276,7 @@ async function loadLiveBusinessRows() {
       SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
-        AND entity IN ('factures','resiliations','passages','abonnements')
+        AND entity IN ('factures','resiliations','abonnements')
     ), totals AS (
       SELECT club,
         coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
@@ -288,13 +290,7 @@ async function loadLiveBusinessRows() {
             AND left(payload->>'cancellationDate',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_increment,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
-          FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today,
-        count(DISTINCT external_uid) FILTER (WHERE entity='passages' AND payload->>'createdAt' LIKE $1 || '%'
-          AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
-          AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') accesses_month,
-        count(DISTINCT contact_uid) FILTER (WHERE entity='passages' AND payload->>'createdAt' LIKE $1 || '%'
-          AND lower(coalesce(payload->>'entryAuthorized','false'))='true' AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
-          AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)') unique_visitors_month
+          FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
       FROM mapped GROUP BY club
     ), tariff_rows AS (
       SELECT club,coalesce(nullif(payload->>'product.name',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),'Sin cuota clasificada') tariff,
@@ -312,10 +308,36 @@ async function loadLiveBusinessRows() {
   return liveBusinessRefresh;
 }
 
+async function loadLiveAccessRows() {
+  if (liveAccessCache && Date.now() - liveAccessCache.at < 55 * 60_000) return liveAccessCache.rows;
+  if (liveAccessRefresh) return liveAccessRefresh;
+  liveAccessRefresh = (async () => {
+    const month = madridDate().slice(0, 7);
+    const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+      count(DISTINCT external_uid)::int accesses_month,
+      count(DISTINCT contact_uid)::int unique_visitors_month
+      FROM resamania_sftp_records
+      WHERE entity='passages' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        AND payload->>'createdAt' LIKE $1 || '%'
+        AND lower(coalesce(payload->>'entryAuthorized','false'))='true'
+        AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
+        AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
+      GROUP BY club`, [month]);
+    liveAccessCache = { at: Date.now(), rows };
+    return rows;
+  })().catch((error) => {
+    console.error(`Live access rollup pending: ${error.message}`);
+    return liveAccessCache?.rows ?? [];
+  }).finally(() => { liveAccessRefresh = null; });
+  return liveAccessRefresh;
+}
+
 async function withLiveBusiness(snapshots) {
   const month = madridDate().slice(0, 7);
   const rows = await loadLiveBusinessRows();
   const live = new Map(rows.map((row) => [row.club, row]));
+  void loadLiveAccessRows();
+  const liveAccess = new Map((liveAccessCache?.rows ?? []).map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
@@ -327,8 +349,9 @@ async function withLiveBusiness(snapshots) {
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
     const billing = baseline.billing + number(row.billing_increment);
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
-    const accesses = number(row.accesses_month);
-    const uniqueVisitors = number(row.unique_visitors_month);
+    const accessRow = liveAccess.get(snapshot.club_code);
+    const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
+    const uniqueVisitors = accessRow ? number(accessRow.unique_visitors_month) : number(snapshot.metrics?.incidences?.uniqueVisitorsMonth);
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs },
