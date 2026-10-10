@@ -360,6 +360,9 @@ async function withLiveBusiness(snapshots) {
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs },
       incidences: { ...snapshot.metrics?.incidences, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
+      commercial: { ...snapshot.metrics?.commercial,
+        ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
+          taxBasis: "Cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
       retention: { active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] } },
     } };
   });
