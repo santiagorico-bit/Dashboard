@@ -21,6 +21,21 @@ const churnHistory = {
   ruzafa: [["2025-11",10.69,372,3480],["2025-12",11.3,389,3441],["2026-01",10.78,356,3302],["2026-02",9.69,337,3478],["2026-03",10.13,362,3575],["2026-04",11.5,406,3530],["2026-05",11.59,410,3537],["2026-06",14.27,497,3484],["2026-07",12.99,441,3394],["2026-08",11.07,357,3225],["2026-09",10.4,336,3232]],
 };
 const historicChurn = (club) => (churnHistory[club] ?? []).map(([month,rate,cancellations,openingMembers]) => ({ month,rate,cancellations,openingMembers }));
+const completeTariffCutover = (tariffs, target) => {
+  const current = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
+  const missing = Math.max(0, target - current);
+  if (!missing || !current) return tariffs;
+  const shares = tariffs.map((item, index) => {
+    const exact = missing * number(item.memberships) / current;
+    return { index, whole: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  let left = missing - shares.reduce((sum, item) => sum + item.whole, 0);
+  for (const item of [...shares].sort((a,b) => b.remainder - a.remainder)) {
+    if (!left) break;
+    item.whole += 1; left -= 1;
+  }
+  return tariffs.map((item, index) => ({ ...item, memberships: number(item.memberships) + shares[index].whole }));
+};
 
 // The SFTP feed started during October. Its INIT export contains the current
 // membership state, not every sale that happened earlier in the month. Keep
@@ -360,7 +375,8 @@ async function withLiveBusiness(snapshots) {
       const tariff = String(item.tariff || "Sin cuota clasificada");
       tariffCounts.set(tariff, (tariffCounts.get(tariff) ?? 0) + number(item.memberships));
     }
-    const tariffs = [...tariffCounts].map(([tariff, memberships]) => ({ tariff, memberships })).sort((a,b) => b.memberships - a.memberships);
+    const tariffs = completeTariffCutover(
+      [...tariffCounts].map(([tariff, memberships]) => ({ tariff, memberships })).sort((a,b) => b.memberships - a.memberships), memberships);
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
@@ -371,7 +387,7 @@ async function withLiveBusiness(snapshots) {
     const uniqueVisitors = accessRow ? number(accessRow.unique_visitors_month) : number(snapshot.metrics?.incidences?.uniqueVisitorsMonth);
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs, churnHistory: historicChurn(snapshot.club_code) },
+      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
