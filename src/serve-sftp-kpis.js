@@ -90,21 +90,15 @@ async function aggregate() {
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
           WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $4
             AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
-        ) ends
-      FROM mapped
-      WHERE entity='abonnements'
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-      GROUP BY club
-    ), active_cutover AS (
-      SELECT club,
+        ) ends,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
           WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $5
             AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2
-        ) starts,
+        ) active_starts,
         count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
           WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $5
             AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
-        ) ends
+        ) active_ends
       FROM mapped
       WHERE entity='abonnements'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
@@ -137,10 +131,10 @@ async function aggregate() {
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='passages' AND source_deleted_at IS NULL GROUP BY club
     )
-    SELECT c.club, m.*, ac.active_members, pc.starts post_cutover_starts,pc.ends post_cutover_ends,acut.starts active_cutover_starts,acut.ends active_cutover_ends,x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
+    SELECT c.club, m.*, ac.active_members, pc.starts post_cutover_starts,pc.ends post_cutover_ends,pc.active_starts active_cutover_starts,pc.active_ends active_cutover_ends,x.cancellations_month,x.cancellations_today,i.billing_net,i.billing_gross,i.billing_today,i.buyers,i.merch,i.supplements,i.day_passes,i.deposits,i.collected_through,
       f.visits,f.conversions,a.accesses_month,a.unique_visitors_month,
       greatest(m.ingested_at,x.ingested_at,i.ingested_at,f.ingested_at,a.ingested_at) collected_at
-    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_memberships ac USING(club) LEFT JOIN post_cutover pc USING(club) LEFT JOIN active_cutover acut USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
+    FROM clubs c LEFT JOIN memberships m USING(club) LEFT JOIN active_memberships ac USING(club) LEFT JOIN post_cutover pc USING(club) LEFT JOIN cancellations x USING(club) LEFT JOIN invoices i USING(club) LEFT JOIN funnel f USING(club) LEFT JOIN accesses a USING(club)
   `, [month, today, yesterday, cutoverBaselines[month]?.membershipFrom ?? `${month}-01`, cutoverBaselines[month]?.activeFrom ?? `${month}-01`]);
 
   return rows.map((row) => {
