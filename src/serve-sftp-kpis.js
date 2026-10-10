@@ -340,19 +340,17 @@ async function loadLiveAccessRows() {
   if (liveAccessRefresh) return liveAccessRefresh;
   liveAccessRefresh = (async () => {
     const month = madridDate().slice(0, 7);
-    const { rows } = await store.pool.query(`WITH passage_counts AS (
-      SELECT ${mappedClub} club,contact_uid,count(DISTINCT external_uid)::int accesses
+    const { rows } = await store.pool.query(`WITH access_totals AS (
+      SELECT ${mappedClub} club,count(DISTINCT external_uid)::int accesses_month,count(DISTINCT contact_uid)::int unique_visitors_month
       FROM resamania_sftp_records
       WHERE entity='passages' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND payload->>'createdAt' LIKE $1 || '%'
         AND lower(coalesce(payload->>'entryAuthorized','false'))='true'
         AND lower(coalesce(payload->>'entryReason',''))!~'(exit|sortie)'
         AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
-      GROUP BY 1,2
-    ), access_totals AS (
-      SELECT club,sum(accesses)::int accesses_month,count(*)::int unique_visitors_month FROM passage_counts GROUP BY club
+      GROUP BY 1
     ), cancellation_contacts AS (
-      SELECT ${mappedClub} club,contact_uid
+      SELECT club_code,contact_uid
       FROM resamania_sftp_records
       WHERE entity='resiliations' AND source_deleted_at IS NULL
         AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
@@ -360,8 +358,15 @@ async function loadLiveAccessRows() {
         AND lower(coalesce(payload->>'state','accepted'))='accepted'
       GROUP BY 1,2
     ), cancellation_accesses AS (
-      SELECT c.club,avg(coalesce(p.accesses,0)) average_cancellation_accesses
-      FROM cancellation_contacts c LEFT JOIN passage_counts p USING(club,contact_uid) GROUP BY c.club
+      SELECT ${mappedClub.replaceAll("club_code", "c.club_code")} club,avg(p.accesses) average_cancellation_accesses
+      FROM cancellation_contacts c CROSS JOIN LATERAL (
+        SELECT count(DISTINCT external_uid)::numeric accesses FROM resamania_sftp_records p
+        WHERE p.entity='passages' AND p.club_code=c.club_code AND p.contact_uid=c.contact_uid
+          AND p.payload->>'createdAt' LIKE $1 || '%'
+          AND lower(coalesce(p.payload->>'entryAuthorized','false'))='true'
+          AND lower(coalesce(p.payload->>'entryReason',''))!~'(exit|sortie)'
+          AND lower(coalesce(p.payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
+      ) p GROUP BY 1
     ) SELECT a.*,c.average_cancellation_accesses FROM access_totals a LEFT JOIN cancellation_accesses c USING(club)`, [month]);
     liveAccessCache = { at: Date.now(), rows };
     return rows;
