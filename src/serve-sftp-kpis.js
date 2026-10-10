@@ -385,6 +385,10 @@ async function withLiveBusiness(snapshots) {
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
     const uniqueVisitors = accessRow ? number(accessRow.unique_visitors_month) : number(snapshot.metrics?.incidences?.uniqueVisitorsMonth);
+    const cancellationSeries = [...historicChurn(snapshot.club_code), {
+      month, cancellations, openingMembers: baseline.members,
+      rate: baseline.members ? cancellations / baseline.members * 100 : 0,
+    }];
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
@@ -392,7 +396,10 @@ async function withLiveBusiness(snapshots) {
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
           taxBasis: "Cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
-      retention: { active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] } },
+      retention: {
+        active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
+        cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: null })) },
+      },
     } };
   });
 }
