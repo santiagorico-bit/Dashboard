@@ -221,22 +221,15 @@ async function loadLiveMembershipRows() {
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const baselineConfig = cutoverBaselines[month];
   const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
-  const activeFrom = baselineConfig?.activeFrom ?? `${month}-01`;
     const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $5 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) active_starts,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $5 AND left(coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate',''),10) <= $2) active_ends,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE source_deleted_at IS NULL
-      AND lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','active')) !~ '(cancel|canceled|cancelled|resili|termin|ended|expired|inact)'
-      AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt',''),10) <= $2
-      AND (coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','')='' OR left(coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate',''),10) >= $2)) raw_active
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts
     FROM resamania_sftp_records
     WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
       AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-      GROUP BY club`, [month, today, yesterday, membershipFrom, activeFrom]);
+      GROUP BY club`, [month, today, yesterday, membershipFrom]);
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
   })().finally(() => { liveMembershipRefresh = null; });
@@ -254,12 +247,11 @@ async function withLiveMemberships(snapshots) {
     if (!row) return snapshot;
     const baseline = baselineConfig?.clubs[snapshot.club_code];
     const memberships = baseline ? baseline.memberships + number(row.membership_starts) : number(row.raw_month);
-    const members = baseline ? baseline.members + number(row.active_starts) - number(row.active_ends) : number(row.raw_active);
     return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
       yesterday: { ...snapshot.metrics?.yesterday, memberships: number(row.yesterday) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, memberships, members,
+      monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
         memberCountBasis: baseline ? "resamania-close-plus-sftp-incremental" : "resamania-sftp",
         membershipBaselineThrough: baseline ? "2026-10-08" : null },
     } };
