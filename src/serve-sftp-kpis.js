@@ -209,6 +209,46 @@ async function latestSnapshots() {
   return rows;
 }
 
+async function withLiveMemberships(snapshots) {
+  const today = madridDate();
+  const month = today.slice(0, 7);
+  const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
+  const baselineConfig = cutoverBaselines[month];
+  const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
+  const activeFrom = baselineConfig?.activeFrom ?? `${month}-01`;
+  const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $5 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) active_starts,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $5 AND left(coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate',''),10) <= $2) active_ends,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE source_deleted_at IS NULL
+      AND lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','active')) !~ '(cancel|canceled|cancelled|resili|termin|ended|expired|inact)'
+      AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt',''),10) <= $2
+      AND (coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','')='' OR left(coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate',''),10) >= $2)) raw_active
+    FROM resamania_sftp_records
+    WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+      AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+    GROUP BY club`, [month, today, yesterday, membershipFrom, activeFrom]);
+  const live = new Map(rows.map((row) => [row.club, row]));
+  return snapshots.map((snapshot) => {
+    const row = live.get(snapshot.club_code);
+    if (!row) return snapshot;
+    const baseline = baselineConfig?.clubs[snapshot.club_code];
+    const memberships = baseline ? baseline.memberships + number(row.membership_starts) : number(row.raw_month);
+    const members = baseline ? baseline.members + number(row.active_starts) - number(row.active_ends) : number(row.raw_active);
+    return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
+      ...snapshot.metrics,
+      today: { ...snapshot.metrics?.today, memberships: number(row.today) },
+      yesterday: { ...snapshot.metrics?.yesterday, memberships: number(row.yesterday) },
+      monthToDate: { ...snapshot.metrics?.monthToDate, memberships, members,
+        memberCountBasis: baseline ? "resamania-close-plus-sftp-incremental" : "resamania-sftp",
+        membershipBaselineThrough: baseline ? "2026-10-08" : null },
+    } };
+  });
+}
+
 const server = http.createServer(async (request, response) => {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("content-type", "application/json; charset=utf-8");
@@ -264,10 +304,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
-      // The live feed must reflect the records already ingested from SFTP.
-      // Persisted snapshots are historical checkpoints and can lag behind a
-      // completed sync (or a newly deployed aggregation rule).
-      const current = await aggregate();
+      const current = await withLiveMemberships(await latestSnapshots());
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
       const { rows: history } = await store.pool.query(`SELECT club_code,club_name,snapshot_date::text,collected_at,source,metrics
@@ -284,5 +321,3 @@ const port = Number(process.env.PORT || 10000);
 server.listen(port, "0.0.0.0", () => console.log(`KPI feed listening on ${port}`));
 await importLegacyHistory();
 setInterval(importLegacyHistory, 15 * 60_000).unref();
-setTimeout(refreshAfterCompletedSync, 1_000).unref();
-setInterval(refreshAfterCompletedSync, 15_000).unref();
