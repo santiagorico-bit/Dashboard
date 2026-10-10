@@ -251,6 +251,23 @@ const server = http.createServer(async (request, response) => {
         GROUP BY 1,2 ORDER BY 1`, [month]);
       response.end(JSON.stringify({ month, clubs: rows })); return;
     }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-daily") {
+      const month = madridDate().slice(0, 7);
+      const { rows } = await store.pool.query(`WITH eligible AS (
+        SELECT ${mappedClub} club, coalesce(contact_uid,external_uid) membership,
+          left(coalesce(payload->>'createdAt',''),10) created_date,
+          left(coalesce(payload->>'startedAt',''),10) started_date,
+          left(coalesce(payload->>'validFrom',''),10) valid_from_date
+        FROM resamania_sftp_records
+        WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+          AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+      ), dates AS (
+        SELECT club, created_date day, 'createdAt' field, count(DISTINCT membership)::int total FROM eligible WHERE created_date LIKE $1 || '%' GROUP BY 1,2
+        UNION ALL SELECT club, started_date, 'startedAt', count(DISTINCT membership)::int FROM eligible WHERE started_date LIKE $1 || '%' GROUP BY 1,2
+        UNION ALL SELECT club, valid_from_date, 'validFrom', count(DISTINCT membership)::int FROM eligible WHERE valid_from_date LIKE $1 || '%' GROUP BY 1,2
+      ) SELECT * FROM dates ORDER BY club,field,day`, [month]);
+      response.end(JSON.stringify({ month, clubs: rows })); return;
+    }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
       // The live feed must reflect the records already ingested from SFTP.
