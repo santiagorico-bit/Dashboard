@@ -328,14 +328,17 @@ async function loadLiveBusinessRows() {
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
       FROM mapped GROUP BY club
-    ), tariff_rows AS (
-      SELECT club,${canonicalMembershipTariff} tariff,
-        count(DISTINCT coalesce(contact_uid,external_uid))::int memberships
+    ), tariff_contacts AS (
+      SELECT DISTINCT ON (club,coalesce(contact_uid,external_uid))
+        club,coalesce(contact_uid,external_uid) contact_key,${canonicalMembershipTariff} tariff
       FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
         AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
           OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END)
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-      GROUP BY club,2
+      ORDER BY club,coalesce(contact_uid,external_uid),coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') DESC,external_uid DESC
+    ), tariff_rows AS (
+      SELECT club,tariff,count(*)::int memberships
+      FROM tariff_contacts GROUP BY club,tariff
     ), tariffs AS (
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
