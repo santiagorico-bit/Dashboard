@@ -23,6 +23,9 @@ const canonicalMembershipTariff = `CASE ${membershipProductCode}
   WHEN 'cdd6' THEN 'Abono 12 Meses'
   ELSE trim(coalesce(nullif(payload->>'product.name',''),nullif(payload->>'initialInfo.productName',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),nullif(payload->>'productCode',''),nullif(payload->>'initialInfo.productCode',''),'Sin cuota clasificada'))
 END`;
+const taxExclusiveLinePrice = `coalesce(nullif(payload->>'priceTE','')::numeric,
+  round(nullif(payload->>'priceTI','')::numeric /
+    (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)))`;
 
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
@@ -150,9 +153,9 @@ async function aggregate() {
       FROM mapped WHERE entity='resiliations' AND source_deleted_at IS NULL GROUP BY club
     ), invoices AS (
       SELECT club,
-        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_net,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_net,
         coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_gross,
-        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $2 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $2 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
         count(DISTINCT contact_uid) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%') buyers,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='merch'),0) merch,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))~'(diet|supp|protein|nutrition)'),0) supplements,
@@ -315,11 +318,11 @@ async function loadLiveBusinessRows() {
         AND entity IN ('factures','resiliations','abonnements')
     ), totals AS (
       SELECT club,
-        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
             AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_increment,
-        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
