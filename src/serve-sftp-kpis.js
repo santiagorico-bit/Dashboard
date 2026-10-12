@@ -10,6 +10,19 @@ const clubNames = new Map([
 ]);
 const mappedClub = `CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OMD' THEN 'madrid' WHEN 'MGA' THEN 'malaga-armengual'
   WHEN 'MSO' THEN 'malaga-soho' WHEN 'VLA' THEN 'les-arts' WHEN 'ONC' THEN 'nuevo-centro' WHEN 'VAL' THEN 'ruzafa' END`;
+const membershipProductCode = `lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))`;
+const canonicalMembershipTariff = `CASE ${membershipProductCode}
+  WHEN 'cdi1' THEN 'ON AIR Essential'
+  WHEN 'cdi2' THEN 'ON AIR Original'
+  WHEN 'cdi3' THEN 'ON AIR Ultra'
+  WHEN 'cdd1' THEN 'Abono 1 Semana'
+  WHEN 'cdd2' THEN 'Abono 1 Mes'
+  WHEN 'cdd3' THEN 'Abono 2 Meses'
+  WHEN 'cdd4' THEN 'Abono 3 Meses'
+  WHEN 'cdd5' THEN 'Abono 6 Meses'
+  WHEN 'cdd6' THEN 'Abono 12 Meses'
+  ELSE trim(coalesce(nullif(payload->>'product.name',''),nullif(payload->>'initialInfo.productName',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),nullif(payload->>'productCode',''),nullif(payload->>'initialInfo.productCode',''),'Sin cuota clasificada'))
+END`;
 
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
@@ -316,10 +329,11 @@ async function loadLiveBusinessRows() {
           FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
       FROM mapped GROUP BY club
     ), tariff_rows AS (
-      SELECT club,coalesce(nullif(payload->>'product.name',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),'Sin cuota clasificada') tariff,
+      SELECT club,${canonicalMembershipTariff} tariff,
         count(DISTINCT coalesce(contact_uid,external_uid))::int memberships
       FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
+        AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
+          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END)
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
       GROUP BY club,2
     ), tariffs AS (
@@ -386,10 +400,9 @@ async function withLiveBusiness(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code) ?? {};
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
-    if (!baseline?.businessThrough) return snapshot;
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
     const tariffCounts = new Map();
-    for (const item of [...(baseline.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
+    for (const item of [...(baseline?.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
       const tariff = String(item.tariff || "Sin cuota clasificada");
       tariffCounts.set(tariff, (tariffCounts.get(tariff) ?? 0) + number(item.memberships));
     }
@@ -397,6 +410,10 @@ async function withLiveBusiness(snapshots) {
       [...tariffCounts].map(([tariff, memberships]) => ({ tariff, memberships })).sort((a,b) => b.memberships - a.memberships), memberships);
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
+    if (!baseline?.businessThrough) return { ...snapshot, metrics: { ...snapshot.metrics,
+      monthToDate: { ...snapshot.metrics?.monthToDate, membershipTariffs: tariffs,
+        tariffClassificationBasis: "resamania-sftp-normalizado" },
+    } };
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
     const billing = baseline.billing + number(row.billing_increment);
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
