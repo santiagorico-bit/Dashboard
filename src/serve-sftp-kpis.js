@@ -462,6 +462,20 @@ const server = http.createServer(async (request, response) => {
         GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
       response.end(JSON.stringify({ states: rows })); return;
     }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/payment-fields") {
+      const { rows: fields } = await store.pool.query(`SELECT field,count(*)::int rows,
+          count(*) FILTER (WHERE value <> '')::int populated
+        FROM resamania_sftp_records r
+        CROSS JOIN LATERAL jsonb_each_text(r.payload) p(field,value)
+        WHERE r.entity='paiements'
+        GROUP BY field ORDER BY field`);
+      const { rows: coverage } = await store.pool.query(`SELECT club_code,${mappedClub} club,count(*)::int rows,
+          min(occurred_at) first_payment,max(occurred_at) last_payment
+        FROM resamania_sftp_records
+        WHERE entity='paiements' AND source_deleted_at IS NULL
+        GROUP BY club_code,2 ORDER BY club_code`);
+      response.end(JSON.stringify({ fields, coverage })); return;
+    }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-fields") {
       const { rows } = await store.pool.query(`SELECT field, array_agg(DISTINCT value ORDER BY value) FILTER (WHERE value <> '') values
         FROM resamania_sftp_records r
