@@ -315,11 +315,11 @@ async function loadLiveBusinessRows() {
         AND entity IN ('factures','resiliations','abonnements')
     ), totals AS (
       SELECT club,
-        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
             AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_increment,
-        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
