@@ -23,9 +23,9 @@ const canonicalMembershipTariff = `CASE ${membershipProductCode}
   WHEN 'cdd6' THEN 'Abono 12 Meses'
   ELSE trim(coalesce(nullif(payload->>'product.name',''),nullif(payload->>'initialInfo.productName',''),nullif(payload->>'name',''),nullif(payload->>'offerName',''),nullif(payload->>'product.code',''),nullif(payload->>'productCode',''),nullif(payload->>'initialInfo.productCode',''),'Sin cuota clasificada'))
 END`;
-const taxExclusiveLinePrice = `coalesce(nullif(payload->>'priceTE','')::numeric,
+const taxExclusiveLinePrice = `coalesce(nullif(nullif(payload->>'priceTE','')::numeric,0),
   round(nullif(payload->>'priceTI','')::numeric /
-    (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)))`;
+    (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)),0)`;
 
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
