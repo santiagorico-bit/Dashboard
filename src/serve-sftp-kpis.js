@@ -26,6 +26,8 @@ END`;
 const taxExclusiveLinePrice = `coalesce(nullif(nullif(payload->>'priceTE','')::numeric,0),
   round(nullif(payload->>'priceTI','')::numeric /
     (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)),0)`;
+const paidInvoiceCondition = `lower(coalesce(payload->>'invoice.financialState',payload->>'financialState',''))='paid'
+  AND lower(coalesce(payload->>'invoice.paymentsStatus',payload->>'paymentsStatus','paid'))='paid'`;
 
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
@@ -63,13 +65,13 @@ const cutoverBaselines = {
     membershipFrom: "2026-10-09",
     activeFrom: "2026-10-06",
     clubs: {
-      madrid: { memberships: 176, members: 3764, businessThrough: "2026-10-07", billing: 70240.56, cancellations: 87,
+      madrid: { memberships: 176, members: 3764, businessThrough: "2026-10-07", billing: 59663.19, cancellations: 87,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 60 }, { tariff: "ON AIR Original", memberships: 30 }, { tariff: "ON AIR Original Web", memberships: 17 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 3 }, { tariff: "ON AIR Ultra Web", memberships: 1 }] },
-      "les-arts": { memberships: 226, members: 3239, businessThrough: "2026-10-07", billing: 41517.38, cancellations: 54,
+      "les-arts": { memberships: 226, members: 3239, businessThrough: "2026-10-07", billing: 34934.96, cancellations: 54,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 59 }, { tariff: "ON AIR Original", memberships: 45 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "ON AIR Original Web", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 4 }, { tariff: "Abono 2 Meses", memberships: 1 }, { tariff: "Abono 3 Meses", memberships: 1 }] },
-      "nuevo-centro": { memberships: 118, members: 2853, businessThrough: "2026-10-05", billing: 18167.68, cancellations: 51,
+      "nuevo-centro": { memberships: 118, members: 2853, businessThrough: "2026-10-05", billing: 24055.56, cancellations: 51,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 26 }, { tariff: "ON AIR Original", memberships: 16 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "Abono 1 Mes", memberships: 2 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Original Web", memberships: 1 }] },
-      ruzafa: { memberships: 139, members: 3700, businessThrough: "2026-10-05", billing: 28103.99, cancellations: 52,
+      ruzafa: { memberships: 139, members: 3700, businessThrough: "2026-10-05", billing: 34051.52, cancellations: 52,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 33 }, { tariff: "ON AIR Original", memberships: 19 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Original Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 2 }] },
     },
   },
@@ -153,10 +155,10 @@ async function aggregate() {
       FROM mapped WHERE entity='resiliations' AND source_deleted_at IS NULL GROUP BY club
     ), invoices AS (
       SELECT club,
-        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_net,
-        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_gross,
-        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $2 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
-        count(DISTINCT contact_uid) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%') buyers,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_net,
+        coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_gross,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $2 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
+        count(DISTINCT contact_uid) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND ${paidInvoiceCondition}) buyers,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='merch'),0) merch,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))~'(diet|supp|protein|nutrition)'),0) supplements,
         count(*) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code','')) IN ('sesion','session')) day_passes,
@@ -321,9 +323,9 @@ async function loadLiveBusinessRows() {
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
             AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
-            AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_increment,
+            AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_increment,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
-          FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed'),0) billing_today,
+          FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
@@ -421,7 +423,7 @@ async function withLiveBusiness(snapshots) {
         tariffClassificationBasis: "resamania-sftp-normalizado" },
     } };
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
-    const billing = baseline.billing + number(row.billing_increment);
+    const billing = Math.round((baseline.billing + number(row.billing_increment)) * 100) / 100;
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
@@ -437,7 +439,7 @@ async function withLiveBusiness(snapshots) {
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
-          taxBasis: "Cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
+          taxBasis: "Facturas cobradas sin IVA · cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
       retention: {
         active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
         cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
