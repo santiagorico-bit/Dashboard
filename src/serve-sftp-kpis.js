@@ -81,6 +81,13 @@ const cutoverBaselines = {
   },
 };
 
+const billingCutoverBaselines = {
+  "2026-10": {
+    barcelona: { through: "2026-10-12", billing: 19805.06 },
+    "malaga-armengual": { through: "2026-10-12", billing: 28148.25 },
+  },
+};
+
 async function importLegacyHistory() {
   const endpoint = process.env.LEGACY_KPI_FEED_URL;
   if (!endpoint) return;
@@ -359,6 +366,11 @@ async function loadLiveBusinessRows() {
             AND coalesce(payload->>'canceledAt','')=''
             AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
+          FILTER (WHERE entity='paiements' AND payload->>'createdAt' LIKE $1 || '%'
+            AND left(payload->>'createdAt',10) > CASE club WHEN 'barcelona' THEN '2026-10-12' WHEN 'malaga-armengual' THEN '2026-10-12' WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
+            AND coalesce(payload->>'canceledAt','')=''
+            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected_increment,
+        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
           FILTER (WHERE entity='paiements' AND left(payload->>'createdAt',10)=$2
             AND coalesce(payload->>'canceledAt','')=''
             AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected_today,
@@ -462,6 +474,9 @@ async function withLiveBusiness(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code) ?? {};
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
+    const billingBaseline = baseline?.businessThrough
+      ? { through: baseline.businessThrough, billing: baseline.billing }
+      : billingCutoverBaselines[month]?.[snapshot.club_code];
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
     const tariffCounts = new Map();
     for (const item of [...(baseline?.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
@@ -473,11 +488,14 @@ async function withLiveBusiness(snapshots) {
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     if (!baseline?.businessThrough) {
-      const billing = Math.round(number(row.billing_collected) * 100) / 100;
+      const billing = Math.round((billingBaseline
+        ? number(billingBaseline.billing) + number(row.billing_collected_increment)
+        : number(row.billing_collected)) * 100) / 100;
       return { ...snapshot, metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
-        billingBasis: "cobros-efectivos-sftp-sin-iva", billingBaselineThrough: null,
+        billingBasis: billingBaseline ? "cierre-validado-mas-cobros-sftp" : "cobros-efectivos-sftp-sin-iva",
+        billingBaselineThrough: billingBaseline?.through ?? null,
         tariffClassificationBasis: "resamania-sftp-normalizado" },
       today: { ...snapshot.metrics?.today, revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       commercial: { ...snapshot.metrics?.commercial,
@@ -487,7 +505,7 @@ async function withLiveBusiness(snapshots) {
     } };
     }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
-    const billing = Math.round(number(row.billing_collected) * 100) / 100;
+    const billing = Math.round((number(baseline.billing) + number(row.billing_collected_increment)) * 100) / 100;
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
@@ -500,6 +518,7 @@ async function withLiveBusiness(snapshots) {
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing,
+        billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
         merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
