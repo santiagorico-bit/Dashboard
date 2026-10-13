@@ -341,24 +341,30 @@ async function loadLiveMembershipRows() {
       WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
         AND ${invoiceState} AND ${paidInvoiceCondition} AND ${productCode}='cdd1'
       GROUP BY club,contact_uid,left(${invoiceDate},10)::date
-    ), memberships AS (
+    ), membership_candidates AS (
       SELECT m.*,
-        left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date
-      FROM mapped m
-      WHERE m.entity='abonnements'
-        AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-        AND NOT (lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode',''))='cdd1'
+        left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date,
+        (lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode',''))='cdd1'
           AND EXISTS (SELECT 1 FROM weekly_invoice_net w
             WHERE w.club=m.club AND w.contact_uid=m.contact_uid
               AND w.invoice_date BETWEEN left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date - 2
                 AND left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date + 2
-              AND w.weekly_net <= 0))
+              AND w.weekly_net <= 0)) free_weekly
+      FROM mapped m
+      WHERE m.entity='abonnements'
+        AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+    ), memberships AS (
+      SELECT * FROM membership_candidates WHERE NOT free_weekly
+    ), free_weekly_totals AS (
+      SELECT club,count(DISTINCT external_uid) FILTER (WHERE started_date < $4::date)::int baseline_free_weekly
+      FROM membership_candidates WHERE free_weekly GROUP BY club
     ) SELECT club,
     count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
     count(DISTINCT external_uid) FILTER (WHERE started_date=$2::date) today,
     count(DISTINCT external_uid) FILTER (WHERE started_date=$3::date) yesterday,
-    count(DISTINCT external_uid) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts
-    FROM memberships GROUP BY club`, [month, today, yesterday, membershipFrom]);
+    count(DISTINCT external_uid) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
+    coalesce(max(f.baseline_free_weekly),0)::int baseline_free_weekly
+    FROM memberships m LEFT JOIN free_weekly_totals f USING(club) GROUP BY club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
@@ -376,7 +382,9 @@ async function withLiveMemberships(snapshots) {
     const row = live.get(snapshot.club_code);
     if (!row) return snapshot;
     const baseline = baselineConfig?.clubs[snapshot.club_code];
-    const memberships = baseline ? baseline.memberships + number(row.membership_starts) : number(row.raw_month);
+    const memberships = baseline
+      ? baseline.memberships - number(row.baseline_free_weekly) + number(row.membership_starts)
+      : number(row.raw_month);
     return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
