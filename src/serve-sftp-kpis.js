@@ -467,9 +467,8 @@ async function loadLiveAccessRows() {
 
 async function withLiveBusiness(snapshots) {
   const month = madridDate().slice(0, 7);
-  void loadLiveBusinessRows();
+  await Promise.all([loadLiveBusinessRows(), loadLiveAccessRows()]);
   const live = new Map((liveBusinessCache?.rows ?? []).map((row) => [row.club, row]));
-  void loadLiveAccessRows();
   const liveAccess = new Map((liveAccessCache?.rows ?? []).map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code) ?? {};
