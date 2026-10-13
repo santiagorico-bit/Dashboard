@@ -18,8 +18,6 @@ services:
         fromDatabase:
           name: onair-resamania-data
           property: connectionString
-      - key: LEGACY_KPI_FEED_URL
-        value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/club-kpis-feed
   - type: cron
     name: onair-resamania-sftp-sync
     runtime: node
@@ -46,10 +44,6 @@ services:
       - key: RESAMANIA_SFTP_PATH
         value: "."
       - key: RESAMANIA_SFTP_HOST_FINGERPRINT
-        sync: false
-      - key: RESAMANIA_SFTP_INGEST_URL
-        value: https://wwtihyqhoshbkgqkozbh.supabase.co/functions/v1/ingest-resamania-sftp
-      - key: RESAMANIA_SFTP_INGEST_TOKEN
         sync: false
       - key: DATABASE_URL
         fromDatabase:

@@ -8,6 +8,12 @@ const clubNames = new Map([
   ["malaga-armengual", "Málaga Armengual"], ["malaga-soho", "Málaga Soho"],
   ["les-arts", "Valencia Les Arts"], ["nuevo-centro", "Valencia Nuevo Centro"], ["ruzafa", "Valencia Ruzafa"],
 ]);
+const expectedClubCodes = new Set(clubNames.keys());
+const assertCompleteClubRows = (rows, label) => {
+  const received = new Set(rows.map((row) => row.club).filter(Boolean));
+  const missing = [...expectedClubCodes].filter((club) => !received.has(club));
+  if (missing.length) throw new Error(`${label} incompleto; faltan: ${missing.join(", ")}`);
+};
 const mappedClub = `CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OMD' THEN 'madrid' WHEN 'MGA' THEN 'malaga-armengual'
   WHEN 'MSO' THEN 'malaga-soho' WHEN 'VLA' THEN 'les-arts' WHEN 'ONC' THEN 'nuevo-centro' WHEN 'VAL' THEN 'ruzafa' END`;
 const membershipProductCode = `lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))`;
@@ -229,6 +235,15 @@ async function aggregate() {
 
 async function persistCurrentSnapshot() {
   const clubs = await aggregate();
+  assertCompleteClubRows(clubs, "Cierre SFTP");
+  for (const row of clubs) {
+    const metrics = row.metrics?.monthToDate ?? {};
+    for (const field of ["memberships", "members", "cancellations", "billing"]) {
+      if (!Number.isFinite(Number(metrics[field])) || Number(metrics[field]) < 0) {
+        throw new Error(`Cierre SFTP inválido para ${row.club_code}: ${field}`);
+      }
+    }
+  }
   const refreshedAt = new Date().toISOString();
   for (const row of clubs) await store.pool.query(`INSERT INTO club_kpi_snapshots(club_code,club_name,snapshot_date,collected_at,source,metrics)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
@@ -322,6 +337,7 @@ async function loadLiveMembershipRows() {
     WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
       AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
       GROUP BY club`, [month, today, yesterday, membershipFrom]);
+    assertCompleteClubRows(rows, "Altas SFTP");
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
   })().finally(() => { liveMembershipRefresh = null; });
@@ -416,6 +432,7 @@ async function loadLiveBusinessRows() {
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
     ) SELECT t.*,f.membership_tariffs FROM totals t LEFT JOIN tariffs f USING(club)`, [month, today]);
+    assertCompleteClubRows(rows, "Negocio SFTP");
     liveBusinessCache = { at: Date.now(), rows };
     return rows;
   })().catch((error) => {
@@ -460,6 +477,7 @@ async function loadLiveAccessRows() {
           AND lower(coalesce(p.payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
       ) p GROUP BY 1
     ) SELECT a.*,c.average_cancellation_accesses FROM access_totals a LEFT JOIN cancellation_accesses c USING(club)`, [month]);
+    assertCompleteClubRows(rows, "Accesos SFTP");
     liveAccessCache = { at: Date.now(), rows };
     return rows;
   })().catch((error) => {
@@ -475,7 +493,10 @@ async function withLiveBusiness(snapshots) {
   const live = new Map((liveBusinessCache?.rows ?? []).map((row) => [row.club, row]));
   const liveAccess = new Map((liveAccessCache?.rows ?? []).map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
-    const row = live.get(snapshot.club_code) ?? {};
+    const row = live.get(snapshot.club_code);
+    // Never replace a valid, persisted snapshot with a partial rollup. A
+    // completed seven-club batch is required before live business values win.
+    if (!row) return snapshot;
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
     const billingBaseline = baseline?.businessThrough
       ? { through: baseline.businessThrough, billing: baseline.billing }
