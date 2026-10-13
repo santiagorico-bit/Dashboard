@@ -399,17 +399,25 @@ async function loadLiveBusinessRows() {
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
-          FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${productCode}='merch'),0) merch,
-        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
+            AND ${paidInvoiceCondition} AND ${productCode}='merch'),0) merch,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+          FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
             AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
-        coalesce(sum(coalesce(nullif(payload->>'quantity','')::numeric,1)) FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
+        coalesce(sum(coalesce(nullif(payload->>'quantity','')::numeric,1)) FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
           AND ${productCode} IN ('sesion','session') AND ${productName}!~'(descuento|discount|coaching|tie)'
           AND coalesce(nullif(payload->>'quantity','')::numeric,1) > 0),0) day_passes,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND coalesce(payload->>'receptionDate',payload->>'createdAt',payload->>'cancellationDate','') LIKE $1 || '%'
-            AND lower(coalesce(payload->>'state','accepted'))='accepted'
-            AND lower(coalesce(payload->>'reason.name',payload->>'motive.name',payload->>'reason',payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)') formula_changes,
+            AND lower(coalesce(payload->>'status',payload->>'state','accepted')) IN ('accepted','active','validated','valid')
+            AND lower(coalesce(payload->>'cancellationMotive.name',payload->>'cancellationMotive.label',payload->>'reason.name',payload->>'motive.name',payload->>'reason',payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)'
+            AND EXISTS (
+              SELECT 1 FROM mapped replacement
+              WHERE replacement.entity='abonnements' AND replacement.club=mapped.club
+                AND replacement.contact_uid=mapped.contact_uid
+                AND lower(coalesce(replacement.payload->>'product.code',replacement.payload->>'productCode',replacement.payload->>'initialInfo.productCode',''))='cdi2'
+                AND left(coalesce(replacement.payload->>'startedAt',replacement.payload->>'validFrom',replacement.payload->>'createdAt',''),7)=$1
+            )) formula_changes,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE WHEN club IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
