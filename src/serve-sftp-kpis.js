@@ -377,22 +377,15 @@ async function loadLiveBusinessRows() {
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND entity IN ('factures','paiements','resiliations','abonnements')
-    ), original_contacts AS MATERIALIZED (
-      SELECT DISTINCT club,contact_uid
+    ), formula_change_totals AS (
+      SELECT club,count(DISTINCT external_uid) formula_changes
       FROM mapped
-      WHERE entity='abonnements' AND contact_uid IS NOT NULL
+      WHERE entity='abonnements'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-    ), formula_change_totals AS (
-      SELECT change.club,count(DISTINCT coalesce(change.payload->>'membership.uid',change.payload->>'uid',change.external_uid)) formula_changes
-      FROM mapped change
-      INNER JOIN original_contacts replacement
-        ON replacement.club=change.club AND replacement.contact_uid=change.contact_uid
-      WHERE change.entity='resiliations'
-        AND coalesce(change.payload->>'receptionDate',change.payload->>'createdAt',change.payload->>'cancellationDate','') LIKE $1 || '%'
-        AND lower(coalesce(change.payload->>'status',change.payload->>'state','accepted')) IN ('accepted','active','validated','valid')
-        AND lower(coalesce(change.payload->>'cancellationMotive.name',change.payload->>'cancellationMotive.label',change.payload->>'reason.name',change.payload->>'motive.name',change.payload->>'reason',change.payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)'
-      GROUP BY change.club
+        AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'product.name',payload->>'name',''))
+          ~'(cambio de f[oó]rmula|changement de formule|formula change)'
+      GROUP BY club
     ), totals AS (
       SELECT club,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
