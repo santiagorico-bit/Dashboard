@@ -509,7 +509,9 @@ async function withLiveBusiness(snapshots) {
     }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
     const billing = Math.round((number(baseline.billing) + number(row.billing_collected_increment)) * 100) / 100;
-    const activeMembers = number(snapshot.metrics?.monthToDate?.members);
+    const activeMembers = number(baseline.members)
+      + (memberships - number(baseline.memberships))
+      - (cancellations - number(baseline.cancellations));
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow
       ? number(baseline.accesses) + number(accessRow.accesses_increment)
