@@ -491,7 +491,7 @@ async function withLiveBusiness(snapshots) {
       const billing = Math.round((billingBaseline
         ? number(billingBaseline.billing) + number(row.billing_collected_increment)
         : number(row.billing_collected)) * 100) / 100;
-      return { ...snapshot, metrics: { ...snapshot.metrics,
+      return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
         billingBasis: billingBaseline ? "cierre-validado-mas-cobros-sftp" : "cobros-efectivos-sftp-sin-iva",
@@ -515,7 +515,7 @@ async function withLiveBusiness(snapshots) {
       month, cancellations, openingMembers: baseline.members,
       rate: baseline.members ? cancellations / baseline.members * 100 : 0, averageAccesses: cancellationAverageAccesses,
     }];
-    return { ...snapshot, metrics: { ...snapshot.metrics,
+    return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
