@@ -121,9 +121,9 @@ async function aggregate() {
     ), clubs AS (SELECT DISTINCT club FROM mapped WHERE club IS NOT NULL),
     memberships AS (
       SELECT club,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $1 || '%') memberships_month,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $2 || '%') memberships_today,
-        count(DISTINCT coalesce(contact_uid, external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $3 || '%') memberships_yesterday,
+        count(DISTINCT external_uid) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $1 || '%') memberships_month,
+        count(DISTINCT external_uid) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $2 || '%') memberships_today,
+        count(DISTINCT external_uid) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt') LIKE $3 || '%') memberships_yesterday,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='abonnements'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
@@ -141,19 +141,19 @@ async function aggregate() {
       GROUP BY club
     ), post_cutover AS (
       SELECT club,
-        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+        count(DISTINCT external_uid) FILTER (
           WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4
             AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2
         ) starts,
-        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+        count(DISTINCT external_uid) FILTER (
           WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $4
             AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
         ) ends,
-        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+        count(DISTINCT external_uid) FILTER (
           WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $5
             AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2
         ) active_starts,
-        count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (
+        count(DISTINCT external_uid) FILTER (
           WHERE coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $5
             AND coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') <= $2
         ) active_ends
@@ -314,10 +314,10 @@ async function loadLiveMembershipRows() {
   const baselineConfig = cutoverBaselines[month];
   const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
     const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
-    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts
+    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
+    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
+    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
+    count(DISTINCT external_uid) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts
     FROM resamania_sftp_records
     WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
       AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
@@ -389,13 +389,13 @@ async function loadLiveBusinessRows() {
           FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
       FROM mapped GROUP BY club
     ), tariff_contacts AS (
-      SELECT DISTINCT ON (club,coalesce(contact_uid,external_uid))
-        club,coalesce(contact_uid,external_uid) contact_key,${canonicalMembershipTariff} tariff
+      SELECT DISTINCT ON (club,external_uid)
+        club,external_uid membership_key,${canonicalMembershipTariff} tariff
       FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
         AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
           OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END)
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-      ORDER BY club,coalesce(contact_uid,external_uid),coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') DESC,external_uid DESC
+      ORDER BY club,external_uid,coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') DESC
     ), tariff_rows AS (
       SELECT club,tariff,count(*)::int memberships
       FROM tariff_contacts GROUP BY club,tariff
@@ -545,7 +545,15 @@ const server = http.createServer(async (request, response) => {
         FROM resamania_sftp_records
         WHERE entity='paiements' AND source_deleted_at IS NULL
         GROUP BY club_code,2 ORDER BY club_code`);
-      response.end(JSON.stringify({ fields, coverage })); return;
+      const { rows: states } = await store.pool.query(`SELECT
+          coalesce(payload->>'incidentState','(vacío)') incident_state,
+          (coalesce(payload->>'canceledAt','') <> '') canceled,
+          count(*)::int rows,
+          sum(coalesce(nullif(payload->>'amount','')::numeric,0)) amount
+        FROM resamania_sftp_records
+        WHERE entity='paiements' AND source_deleted_at IS NULL
+        GROUP BY 1,2 ORDER BY 1,2`);
+      response.end(JSON.stringify({ fields, coverage, states })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-fields") {
       const { rows } = await store.pool.query(`SELECT field, array_agg(DISTINCT value ORDER BY value) FILTER (WHERE value <> '') values
