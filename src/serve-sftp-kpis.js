@@ -524,7 +524,7 @@ async function withLiveBusiness(snapshots) {
     }];
     return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing,
+      monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
         merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
