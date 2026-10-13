@@ -28,6 +28,10 @@ const taxExclusiveLinePrice = `coalesce(nullif(nullif(payload->>'priceTE','')::n
     (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)),0)`;
 const paidInvoiceCondition = `lower(coalesce(payload->>'invoice.financialState',payload->>'financialState',''))='paid'
   AND lower(coalesce(payload->>'invoice.paymentsStatus',payload->>'paymentsStatus','paid'))='paid'`;
+const invoiceDate = `coalesce(payload->>'invoice.generatedAt',payload->>'invoice.createdAt',payload->>'generatedAt',payload->>'createdAt','')`;
+const invoiceState = `lower(coalesce(payload->>'invoice.state',payload->>'state','completed'))='completed'`;
+const productCode = `lower(coalesce(payload->>'product.code',payload->>'code',payload->>'article.code',''))`;
+const productName = `lower(coalesce(payload->>'product.name',payload->>'name',payload->>'article.name',''))`;
 
 const madridDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(date);
 const number = (value) => Number(value ?? 0);
@@ -74,6 +78,15 @@ const cutoverBaselines = {
       ruzafa: { memberships: 139, members: 3700, businessThrough: "2026-10-05", billing: 34051.52, cancellations: 52,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 33 }, { tariff: "ON AIR Original", memberships: 19 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Original Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 2 }] },
     },
+  },
+};
+
+// Billing-only closes for clubs outside the original four-club cut-over.
+// Memberships and cancellations for these clubs continue to come from SFTP.
+const billingCutoverBaselines = {
+  "2026-10": {
+    barcelona: { through: "2026-10-12", billing: 19805.06, source: "resamania-close" },
+    "malaga-armengual": { through: "2026-10-12", billing: 28148.25, source: "resamania-close" },
   },
 };
 
@@ -260,6 +273,36 @@ let liveBusinessCache = null;
 let liveBusinessRefresh = null;
 let liveAccessCache = null;
 let liveAccessRefresh = null;
+let googleReviewsCache = new Map();
+
+const googleReviewPages = new Map([
+  ["barcelona", "https://www.onairfitness.es/clubes/barcelona-universitat/"],
+  ["madrid", "https://www.onairfitness.es/clubes/madrid-delicias/"],
+  ["malaga-armengual", "https://www.onairfitness.es/clubes/malaga-armengual/"],
+  ["malaga-soho", "https://www.onairfitness.es/clubes/malaga-soho/"],
+  ["les-arts", "https://www.onairfitness.es/clubes/valencia-les-arts/"],
+  ["nuevo-centro", "https://www.onairfitness.es/clubes/valencia-nuevocentro/"],
+  ["ruzafa", "https://www.onairfitness.es/clubes/valencia-ruzafa/"],
+]);
+
+async function refreshGoogleReviews() {
+  const collectedAt = new Date().toISOString();
+  const entries = await Promise.all([...googleReviewPages].map(async ([club, url]) => {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(20_000), headers: { "user-agent": "ON AIR KPI monitor/1.0" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const html = await response.text();
+      const rating = Number(html.match(/class="rating"[^>]*>\s*<p>\s*([0-5](?:[.,]\d)?)/i)?.[1]?.replace(",", "."));
+      const reviewCount = Number(html.match(/Calificaci[oó]n basada en\s*([\d.]+)\s*reseñas de Google/i)?.[1]?.replaceAll(".", ""));
+      if (!Number.isFinite(rating) || !Number.isFinite(reviewCount)) return [club, null];
+      return [club, { rating, reviewCount, collectedAt, source: "google_places" }];
+    } catch (error) {
+      console.error(`Google reviews pending for ${club}: ${error.message}`);
+      return [club, googleReviewsCache.get(club) ?? null];
+    }
+  }));
+  googleReviewsCache = new Map(entries);
+}
 
 async function loadLiveMembershipRows() {
   if (liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
@@ -322,10 +365,22 @@ async function loadLiveBusinessRows() {
       SELECT club,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
-            AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
+            AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'barcelona' THEN '2026-10-12' WHEN 'malaga-armengual' THEN '2026-10-12' WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_increment,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+          FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${productCode}='merch'),0) merch,
+        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+          FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
+            AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
+        coalesce(sum(coalesce(nullif(payload->>'quantity','')::numeric,1)) FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
+          AND ${productCode} IN ('sesion','session') AND ${productName}!~'(descuento|discount|coaching|tie)'
+          AND coalesce(nullif(payload->>'quantity','')::numeric,1) > 0),0) day_passes,
+        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+          FILTER (WHERE entity='resiliations' AND coalesce(payload->>'receptionDate',payload->>'createdAt',payload->>'cancellationDate','') LIKE $1 || '%'
+            AND lower(coalesce(payload->>'state','accepted'))='accepted'
+            AND lower(coalesce(payload->>'reason.name',payload->>'motive.name',payload->>'reason',payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)') formula_changes,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE club WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
@@ -408,6 +463,9 @@ async function withLiveBusiness(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code) ?? {};
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
+    const billingBaseline = baseline?.businessThrough
+      ? { through: baseline.businessThrough, billing: baseline.billing, source: "resamania-close" }
+      : billingCutoverBaselines[month]?.[snapshot.club_code];
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
     const tariffCounts = new Map();
     for (const item of [...(baseline?.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
@@ -418,10 +476,20 @@ async function withLiveBusiness(snapshots) {
       [...tariffCounts].map(([tariff, memberships]) => ({ tariff, memberships })).sort((a,b) => b.memberships - a.memberships), memberships);
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
-    if (!baseline?.businessThrough) return { ...snapshot, metrics: { ...snapshot.metrics,
-      monthToDate: { ...snapshot.metrics?.monthToDate, membershipTariffs: tariffs,
-        tariffClassificationBasis: "resamania-sftp-normalizado" },
+    if (!baseline?.businessThrough) {
+      const billing = billingBaseline
+        ? Math.round((number(billingBaseline.billing) + number(row.billing_increment)) * 100) / 100
+        : number(snapshot.metrics?.monthToDate?.billing);
+      return { ...snapshot, metrics: { ...snapshot.metrics,
+      monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
+        dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
+        billingBasis: billingBaseline ? `${billingBaseline.source}-plus-sftp-incremental` : snapshot.metrics?.monthToDate?.billingBasis,
+        billingBaselineThrough: billingBaseline?.through ?? null, tariffClassificationBasis: "resamania-sftp-normalizado" },
+      commercial: { ...snapshot.metrics?.commercial,
+        ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing } },
+      googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
+    }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
     const billing = Math.round((baseline.billing + number(row.billing_increment)) * 100) / 100;
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
@@ -435,7 +503,9 @@ async function withLiveBusiness(snapshots) {
     }];
     return { ...snapshot, metrics: { ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing, membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
+      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing,
+        merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
+        membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
@@ -444,6 +514,7 @@ async function withLiveBusiness(snapshots) {
         active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
         cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
       },
+      googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
   });
 }
@@ -531,6 +602,8 @@ const server = http.createServer(async (request, response) => {
 });
 
 const port = Number(process.env.PORT || 10000);
+void refreshGoogleReviews();
+setInterval(() => void refreshGoogleReviews(), 7 * 24 * 60 * 60_000).unref();
 server.listen(port, "0.0.0.0", () => console.log(`KPI feed listening on ${port}`));
 await importLegacyHistory();
 setInterval(importLegacyHistory, 15 * 60_000).unref();
