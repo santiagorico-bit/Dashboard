@@ -377,17 +377,24 @@ async function loadLiveBusinessRows() {
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND entity IN ('factures','paiements','resiliations','abonnements')
-    ), formula_change_totals AS (
-      SELECT club,count(DISTINCT external_uid) formula_changes
+    ), original_starts AS MATERIALIZED (
+      SELECT club,contact_uid,external_uid,
+        nullif(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),'')::date started_at
       FROM mapped
-      WHERE entity='abonnements'
+      WHERE entity='abonnements' AND contact_uid IS NOT NULL
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        -- Resamania has emitted the offer label under different JSON paths
-        -- across SFTP versions. The row is already narrowed to a new Original
-        -- membership, so inspect the complete payload for the change marker.
-        AND lower(payload::text)~'(cambio de f[oó]rmula|changement de formule|formula change)'
-      GROUP BY club
+    ), formula_change_totals AS (
+      SELECT original.club,count(DISTINCT original.external_uid) formula_changes
+      FROM original_starts original
+      INNER JOIN mapped previous ON previous.club=original.club
+        AND previous.contact_uid=original.contact_uid
+        AND previous.entity='abonnements' AND previous.external_uid<>original.external_uid
+        AND lower(coalesce(previous.payload->>'product.code',previous.payload->>'productCode',previous.payload->>'initialInfo.productCode',''))<>'cdi2'
+        AND nullif(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),'')::date < original.started_at
+        AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
+          BETWEEN original.started_at - 7 AND original.started_at + 7
+      GROUP BY original.club
     ), totals AS (
       SELECT club,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
