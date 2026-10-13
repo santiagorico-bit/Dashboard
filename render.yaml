@@ -18,6 +18,8 @@ services:
         fromDatabase:
           name: onair-resamania-data
           property: connectionString
+      - key: KPI_PRIVATE_TOKEN
+        sync: false
   - type: cron
     name: onair-resamania-sftp-sync
     runtime: node

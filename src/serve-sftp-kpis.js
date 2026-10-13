@@ -1,4 +1,5 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { createPostgresStore } from "./sftp-postgres-store.js";
 
 const store = createPostgresStore();
@@ -9,6 +10,14 @@ const clubNames = new Map([
   ["les-arts", "Valencia Les Arts"], ["nuevo-centro", "Valencia Nuevo Centro"], ["ruzafa", "Valencia Ruzafa"],
 ]);
 const expectedClubCodes = new Set(clubNames.keys());
+const privateFeedToken = process.env.KPI_PRIVATE_TOKEN ?? "";
+const privateAuthorized = (request) => {
+  if (!privateFeedToken) return false;
+  const supplied = String(request.headers["x-private-token"] ?? request.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "");
+  const expected = Buffer.from(privateFeedToken);
+  const actual = Buffer.from(supplied);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+};
 const assertCompleteClubRows = (rows, label) => {
   const received = new Set(rows.map((row) => row.club).filter(Boolean));
   const missing = [...expectedClubCodes].filter((club) => !received.has(club));
@@ -654,6 +663,51 @@ const server = http.createServer(async (request, response) => {
   try {
     if (request.method === "GET" && request.url?.split("?")[0] === "/health") {
       response.end(JSON.stringify({ ok: true, service: "onair-kpi-feed", at: new Date().toISOString() })); return;
+    }
+    if (request.method === "GET" && request.url?.split("?")[0] === "/private/signups") {
+      response.setHeader("cache-control", "private, no-store");
+      if (!privateAuthorized(request)) {
+        response.statusCode = 401; response.end(JSON.stringify({ error: "Unauthorized" })); return;
+      }
+      const url = new URL(request.url, "http://localhost");
+      const club = url.searchParams.get("club") ?? "";
+      const month = url.searchParams.get("month") ?? madridDate().slice(0, 7);
+      if (!expectedClubCodes.has(club) || !/^\d{4}-\d{2}$/.test(month)) {
+        response.statusCode = 400; response.end(JSON.stringify({ error: "Invalid club or month" })); return;
+      }
+      const { rows } = await store.pool.query(`WITH memberships AS (
+        SELECT DISTINCT ON (external_uid) external_uid,contact_uid,payload,
+          coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') started_at,
+          ${canonicalMembershipTariff} tariff
+        FROM resamania_sftp_records
+        WHERE entity='abonnements' AND ${mappedClub}=$1
+          AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') LIKE $2 || '%'
+          AND ${membershipProductCode} !~ '(day|jour|dia|sesion|session|vip|admin)'
+        ORDER BY external_uid,coalesce(source_updated_at,ingested_at) DESC
+      ), free_weekly AS (
+        SELECT DISTINCT contact_uid FROM resamania_sftp_records
+        WHERE entity='factures' AND ${mappedClub}=$1
+          AND ${productCode}='cdd1' AND ${invoiceDate} LIKE $2 || '%'
+          AND ${invoiceState} AND ${paidInvoiceCondition}
+          AND coalesce(${taxExclusiveLinePrice},0) <= 0
+      ), contacts AS (
+        SELECT DISTINCT ON (external_uid) external_uid,payload
+        FROM resamania_sftp_records WHERE entity='contacts' AND ${mappedClub}=$1
+        ORDER BY external_uid,coalesce(source_updated_at,ingested_at) DESC
+      )
+      SELECT m.external_uid id,m.contact_uid,m.started_at,m.tariff,
+        coalesce(c.payload->>'firstName','') first_name,
+        coalesce(c.payload->>'lastName','') last_name,
+        coalesce(c.payload->>'email','') email
+      FROM memberships m LEFT JOIN contacts c ON c.external_uid=m.contact_uid
+      WHERE NOT (${membershipProductCode.replaceAll("payload", "m.payload")}='cdd1' AND EXISTS (
+        SELECT 1 FROM free_weekly f WHERE f.contact_uid=m.contact_uid
+      )) ORDER BY m.started_at DESC,m.external_uid`, [club, month]);
+      response.end(JSON.stringify({ club, month, signups: rows.map((row) => ({
+        id: row.id, contactUid: row.contact_uid, firstName: row.first_name, lastName: row.last_name,
+        email: row.email, tariff: row.tariff, startedAt: row.started_at,
+        resamaniaUrl: `https://app.resamania.com/onairespana/-/management/contacts/${encodeURIComponent(String(row.contact_uid).replace(/^.*\//, ""))}`,
+      })) })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/diagnostics/membership-states") {
       const { rows } = await store.pool.query(`SELECT coalesce(payload->>'state',payload->>'status',payload->>'membership.state','(vacío)') state,count(*)::int

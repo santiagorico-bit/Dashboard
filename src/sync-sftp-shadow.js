@@ -22,7 +22,7 @@ const initialExportEntities = new Set((process.env.RESAMANIA_SFTP_INIT_ENTITIES 
   .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const maxAgeHours = Math.max(0, Number(process.env.RESAMANIA_SFTP_MAX_AGE_HOURS || 0));
 const chunkSize = 400;
-const initialExportSchemaVersion = "2";
+const initialExportSchemaVersion = "3";
 const isInitialExport = (filename) => /(?:^|[_-])init\d*(?:[_\-.]|$)/i.test(filename);
 const isPrioritizedInitialExport = (filename) => isInitialExport(filename)
   && initialExportEntities.has(entityFromFilename(filename));

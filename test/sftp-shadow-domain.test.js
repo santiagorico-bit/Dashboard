@@ -21,6 +21,19 @@ test("drops PII before transmission", () => {
   assert.deepEqual(payload, { uid: "1", clubName: "Madrid Delicias", productName: "Essential" });
 });
 
+test("contact payload keeps only the minimal identity fields", () => {
+  const row = mapRecord("contacts", {
+    uid: "contact-1", firstName: "Ana", lastName: "García", email: "ana@example.com",
+    phone: "600000000", address: "Calle privada", iban: "ES0000",
+  });
+  assert.equal(row.payload.firstName, "Ana");
+  assert.equal(row.payload.lastName, "García");
+  assert.equal(row.payload.email, "ana@example.com");
+  assert.equal(row.payload.phone, undefined);
+  assert.equal(row.payload.address, undefined);
+  assert.equal(row.payload.iban, undefined);
+});
+
 test("keeps non-personal membership validity fields", () => {
   const payload = safePayload({
     uid: "sub-1", startAt: "2026-01-01", endAt: "2026-12-31",

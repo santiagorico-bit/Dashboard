@@ -23,10 +23,18 @@ export function normalizedRecord(record) {
 
 const first = (row, candidates) => candidates.map((key) => row[key]).find((value) => value !== undefined && value !== "") ?? null;
 
-export function safePayload(record) {
+export function safePayload(record, entity = null) {
   const denied = /(email|mail|phone|telephone|mobile|address|adresse|postal|zipcode|firstname|lastname|surname|birth|birthday|iban|bic|mandate|password)/i;
   const allowed = /(uid|state|status|club|membership|abonnement|product|produit|article|family|famille|billing|rhythm|date|time|created|updated|deleted|authorized|crossing|point|passage|type|zone|reason|motif|invoice|facture|reference|channel|quantity|quantite|price|prix|tax|tva|financial|source|goal|objectif|salesperson|commercial|amount|montant|payment|paiement|start|begin|debut|valid|effective|end|fin|term|cancel|resili|period)/i;
-  return Object.fromEntries(Object.entries(record).filter(([key]) => allowed.test(key) && !denied.test(key)));
+  const payload = Object.fromEntries(Object.entries(record).filter(([key]) => allowed.test(key) && !denied.test(key)));
+  if (entity !== "contacts") return payload;
+  const row = normalizedRecord(record);
+  return {
+    ...payload,
+    firstName: first(row, ["firstname", "givenname", "prenom"]),
+    lastName: first(row, ["lastname", "familyname", "surname", "nom"]),
+    email: first(row, ["email", "mail", "emailaddress"]),
+  };
 }
 
 export function mapRecord(entity, record, ordinal = 0) {
@@ -41,7 +49,7 @@ export function mapRecord(entity, record, ordinal = 0) {
     occurredAt: first(row, ["crossedat", "passageat", "generatedat", "invoicedate", "paymentdate", "receptiondate", "cancellationdate", "createdat"]),
     sourceUpdatedAt: first(row, ["updatedat", "modifiedat", "lastupdatedat"]),
     sourceDeletedAt: first(row, ["deletedat", "removedat"]),
-    payload: safePayload(record),
+    payload: safePayload(record, entity),
   };
 }
 
