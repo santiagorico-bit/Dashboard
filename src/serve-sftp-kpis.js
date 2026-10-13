@@ -75,13 +75,13 @@ const cutoverBaselines = {
     membershipFrom: "2026-10-13",
     activeFrom: "2026-10-13",
     clubs: {
-      madrid: { memberships: 184, members: 3711, accesses: 15030, businessThrough: "2026-10-12", billing: 67857, cancellations: 164,
+      madrid: { memberships: 184, members: 3711, accesses: 15030, businessThrough: "2026-10-12", billing: 67857, cancellations: 164, formulaChanges: 7,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 60 }, { tariff: "ON AIR Original", memberships: 30 }, { tariff: "ON AIR Original Web", memberships: 17 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 3 }, { tariff: "ON AIR Ultra Web", memberships: 1 }] },
-      "les-arts": { memberships: 241, members: 3264, accesses: 12027, businessThrough: "2026-10-12", billing: 53652, cancellations: 141,
+      "les-arts": { memberships: 241, members: 3264, accesses: 12027, businessThrough: "2026-10-12", billing: 53652, cancellations: 141, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 59 }, { tariff: "ON AIR Original", memberships: 45 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "ON AIR Original Web", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 4 }, { tariff: "Abono 2 Meses", memberships: 1 }, { tariff: "Abono 3 Meses", memberships: 1 }] },
-      "nuevo-centro": { memberships: 132, members: 2768, accesses: 7724, businessThrough: "2026-10-12", billing: 35915, cancellations: 163,
+      "nuevo-centro": { memberships: 132, members: 2768, accesses: 7724, businessThrough: "2026-10-12", billing: 35915, cancellations: 163, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 26 }, { tariff: "ON AIR Original", memberships: 16 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "Abono 1 Mes", memberships: 2 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Original Web", memberships: 1 }] },
-      ruzafa: { memberships: 153, members: 3612, accesses: 10295, businessThrough: "2026-10-12", billing: 57363, cancellations: 173,
+      ruzafa: { memberships: 153, members: 3612, accesses: 10295, businessThrough: "2026-10-12", billing: 57363, cancellations: 173, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 33 }, { tariff: "ON AIR Original", memberships: 19 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Original Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 2 }] },
       "malaga-armengual": { memberships: 169, members: 2999, accesses: 9326, businessThrough: "2026-10-12", billing: 42971, cancellations: 109,
         tariffs: [] },
@@ -384,6 +384,8 @@ async function loadLiveBusinessRows() {
       WHERE entity='abonnements' AND contact_uid IS NOT NULL
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
+        AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
+          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-12')
     ), formula_change_totals AS (
       SELECT original.club,count(DISTINCT original.external_uid) formula_changes
       FROM original_starts original
@@ -563,7 +565,9 @@ async function withLiveBusiness(snapshots) {
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
-        merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
+        merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes),
+        formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes),
+        formulaChangeBasis: baseline.formulaChanges == null ? "resamania-sftp" : "cierre-resamania-mas-incrementales-sftp",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
