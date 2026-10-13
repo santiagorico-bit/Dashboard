@@ -328,15 +328,37 @@ async function loadLiveMembershipRows() {
   const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const baselineConfig = cutoverBaselines[month];
   const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
-    const { rows } = await store.pool.query(`SELECT ${mappedClub} club,
+    const { rows } = await store.pool.query(`WITH mapped AS NOT MATERIALIZED (
+      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
+      FROM resamania_sftp_records
+      WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+        AND entity IN ('abonnements','factures')
+    ), weekly_invoice_net AS (
+      SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
+        sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
+          * coalesce(nullif(payload->>'quantity','')::numeric,1)) weekly_net
+      FROM mapped
+      WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
+        AND ${invoiceState} AND ${paidInvoiceCondition} AND ${productCode}='cdd1'
+      GROUP BY club,contact_uid,left(${invoiceDate},10)::date
+    ), memberships AS (
+      SELECT m.*,
+        left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date
+      FROM mapped m
+      WHERE m.entity='abonnements'
+        AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND NOT (lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode',''))='cdd1'
+          AND EXISTS (SELECT 1 FROM weekly_invoice_net w
+            WHERE w.club=m.club AND w.contact_uid=m.contact_uid
+              AND w.invoice_date BETWEEN left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date - 2
+                AND left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date + 2
+              AND w.weekly_net <= 0))
+    ) SELECT club,
     count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
-    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$2) today,
-    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10)=$3) yesterday,
-    count(DISTINCT external_uid) FILTER (WHERE coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') >= $4 AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) <= $2) membership_starts
-    FROM resamania_sftp_records
-    WHERE entity='abonnements' AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
-      AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-      GROUP BY club`, [month, today, yesterday, membershipFrom]);
+    count(DISTINCT external_uid) FILTER (WHERE started_date=$2::date) today,
+    count(DISTINCT external_uid) FILTER (WHERE started_date=$3::date) yesterday,
+    count(DISTINCT external_uid) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts
+    FROM memberships GROUP BY club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
@@ -397,6 +419,14 @@ async function loadLiveBusinessRows() {
         AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
           BETWEEN original.started_at - 7 AND original.started_at + 7
       GROUP BY original.club
+    ), weekly_invoice_net AS (
+      SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
+        sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
+          * coalesce(nullif(payload->>'quantity','')::numeric,1)) weekly_net
+      FROM mapped
+      WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
+        AND ${invoiceState} AND ${paidInvoiceCondition} AND ${productCode}='cdd1'
+      GROUP BY club,contact_uid,left(${invoiceDate},10)::date
     ), day_pass_invoice_lines AS (
       SELECT club,
         coalesce(nullif(payload->>'invoice.uid',''),nullif(payload->>'invoice.reference',''),
@@ -462,6 +492,12 @@ async function loadLiveBusinessRows() {
         AND (club NOT IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa')
           OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-12')
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND NOT (lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdd1'
+          AND EXISTS (SELECT 1 FROM weekly_invoice_net w
+            WHERE w.club=mapped.club AND w.contact_uid=mapped.contact_uid
+              AND w.invoice_date BETWEEN left(coalesce(mapped.payload->>'startedAt',mapped.payload->>'validFrom',mapped.payload->>'createdAt',''),10)::date - 2
+                AND left(coalesce(mapped.payload->>'startedAt',mapped.payload->>'validFrom',mapped.payload->>'createdAt',''),10)::date + 2
+              AND w.weekly_net <= 0))
       ORDER BY club,external_uid,coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') DESC
     ), tariff_rows AS (
       SELECT club,tariff,count(*)::int memberships
