@@ -377,6 +377,22 @@ async function loadLiveBusinessRows() {
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND entity IN ('factures','paiements','resiliations','abonnements')
+    ), original_contacts AS MATERIALIZED (
+      SELECT DISTINCT club,contact_uid
+      FROM mapped
+      WHERE entity='abonnements' AND contact_uid IS NOT NULL
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
+        AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
+    ), formula_change_totals AS (
+      SELECT change.club,count(DISTINCT coalesce(change.payload->>'membership.uid',change.payload->>'uid',change.external_uid)) formula_changes
+      FROM mapped change
+      INNER JOIN original_contacts replacement
+        ON replacement.club=change.club AND replacement.contact_uid=change.contact_uid
+      WHERE change.entity='resiliations'
+        AND coalesce(change.payload->>'receptionDate',change.payload->>'createdAt',change.payload->>'cancellationDate','') LIKE $1 || '%'
+        AND lower(coalesce(change.payload->>'status',change.payload->>'state','accepted')) IN ('accepted','active','validated','valid')
+        AND lower(coalesce(change.payload->>'cancellationMotive.name',change.payload->>'cancellationMotive.label',change.payload->>'reason.name',change.payload->>'motive.name',change.payload->>'reason',change.payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)'
+      GROUP BY change.club
     ), totals AS (
       SELECT club,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
@@ -408,17 +424,6 @@ async function loadLiveBusinessRows() {
           AND ${productCode} IN ('sesion','session') AND ${productName}!~'(descuento|discount|coaching|tie)'
           AND coalesce(nullif(payload->>'quantity','')::numeric,1) > 0),0) day_passes,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
-          FILTER (WHERE entity='resiliations' AND coalesce(payload->>'receptionDate',payload->>'createdAt',payload->>'cancellationDate','') LIKE $1 || '%'
-            AND lower(coalesce(payload->>'status',payload->>'state','accepted')) IN ('accepted','active','validated','valid')
-            AND lower(coalesce(payload->>'cancellationMotive.name',payload->>'cancellationMotive.label',payload->>'reason.name',payload->>'motive.name',payload->>'reason',payload->>'motive',''))~'(cambio de f[oó]rmula|changement de formule|formula change)'
-            AND EXISTS (
-              SELECT 1 FROM mapped replacement
-              WHERE replacement.entity='abonnements' AND replacement.club=mapped.club
-                AND replacement.contact_uid=mapped.contact_uid
-                AND lower(coalesce(replacement.payload->>'product.code',replacement.payload->>'productCode',replacement.payload->>'initialInfo.productCode',''))='cdi2'
-                AND left(coalesce(replacement.payload->>'startedAt',replacement.payload->>'validFrom',replacement.payload->>'createdAt',''),7)=$1
-            )) formula_changes,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE WHEN club IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_increment,
@@ -439,7 +444,8 @@ async function loadLiveBusinessRows() {
     ), tariffs AS (
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
-    ) SELECT t.*,f.membership_tariffs FROM totals t LEFT JOIN tariffs f USING(club)`, [month, today]);
+    ) SELECT t.*,coalesce(fc.formula_changes,0) formula_changes,f.membership_tariffs
+      FROM totals t LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`, [month, today]);
     assertCompleteClubRows(rows, "Negocio SFTP");
     liveBusinessCache = { at: Date.now(), rows };
     return rows;
