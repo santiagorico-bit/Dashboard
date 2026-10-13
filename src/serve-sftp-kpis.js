@@ -81,15 +81,6 @@ const cutoverBaselines = {
   },
 };
 
-// Billing-only closes for clubs outside the original four-club cut-over.
-// Memberships and cancellations for these clubs continue to come from SFTP.
-const billingCutoverBaselines = {
-  "2026-10": {
-    barcelona: { through: "2026-10-12", billing: 19805.06, source: "resamania-close" },
-    "malaga-armengual": { through: "2026-10-12", billing: 28148.25, source: "resamania-close" },
-  },
-};
-
 async function importLegacyHistory() {
   const endpoint = process.env.LEGACY_KPI_FEED_URL;
   if (!endpoint) return;
@@ -360,9 +351,17 @@ async function loadLiveBusinessRows() {
       SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
-        AND entity IN ('factures','resiliations','abonnements')
+        AND entity IN ('factures','paiements','resiliations','abonnements')
     ), totals AS (
       SELECT club,
+        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
+          FILTER (WHERE entity='paiements' AND payload->>'createdAt' LIKE $1 || '%'
+            AND coalesce(payload->>'canceledAt','')=''
+            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected,
+        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
+          FILTER (WHERE entity='paiements' AND left(payload->>'createdAt',10)=$2
+            AND coalesce(payload->>'canceledAt','')=''
+            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected_today,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
             AND left(payload->>'invoice.generatedAt',10) > CASE club WHEN 'barcelona' THEN '2026-10-12' WHEN 'malaga-armengual' THEN '2026-10-12' WHEN 'madrid' THEN '2026-10-07' WHEN 'les-arts' THEN '2026-10-07' ELSE '2026-10-05' END
@@ -463,9 +462,6 @@ async function withLiveBusiness(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code) ?? {};
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
-    const billingBaseline = baseline?.businessThrough
-      ? { through: baseline.businessThrough, billing: baseline.billing, source: "resamania-close" }
-      : billingCutoverBaselines[month]?.[snapshot.club_code];
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
     const tariffCounts = new Map();
     for (const item of [...(baseline?.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
@@ -477,21 +473,21 @@ async function withLiveBusiness(snapshots) {
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     if (!baseline?.businessThrough) {
-      const billing = billingBaseline
-        ? Math.round((number(billingBaseline.billing) + number(row.billing_increment)) * 100) / 100
-        : number(snapshot.metrics?.monthToDate?.billing);
+      const billing = Math.round(number(row.billing_collected) * 100) / 100;
       return { ...snapshot, metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
-        billingBasis: billingBaseline ? `${billingBaseline.source}-plus-sftp-incremental` : snapshot.metrics?.monthToDate?.billingBasis,
-        billingBaselineThrough: billingBaseline?.through ?? null, tariffClassificationBasis: "resamania-sftp-normalizado" },
+        billingBasis: "cobros-efectivos-sftp-sin-iva", billingBaselineThrough: null,
+        tariffClassificationBasis: "resamania-sftp-normalizado" },
+      today: { ...snapshot.metrics?.today, revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       commercial: { ...snapshot.metrics?.commercial,
-        ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing } },
+        ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
+          taxBasis: "Cobros efectivos SFTP sin IVA; anulados e incidencias abiertas excluidos", collectedThrough: madridDate() } },
       googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
     }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
-    const billing = Math.round((baseline.billing + number(row.billing_increment)) * 100) / 100;
+    const billing = Math.round(number(row.billing_collected) * 100) / 100;
     const activeMembers = number(snapshot.metrics?.monthToDate?.members);
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow ? number(accessRow.accesses_month) : number(snapshot.metrics?.incidences?.accessesMonth);
@@ -502,14 +498,14 @@ async function withLiveBusiness(snapshots) {
       rate: baseline.members ? cancellations / baseline.members * 100 : 0, averageAccesses: cancellationAverageAccesses,
     }];
     return { ...snapshot, metrics: { ...snapshot.metrics,
-      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_today), billing: number(row.billing_today) },
+      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations, billing,
         merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
-          taxBasis: "Facturas cobradas sin IVA · cierre Resamania + incrementales SFTP", collectedThrough: madridDate() } },
+          taxBasis: "Cobros efectivos SFTP sin IVA; anulados e incidencias abiertas excluidos", collectedThrough: madridDate() } },
       retention: {
         active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
         cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
