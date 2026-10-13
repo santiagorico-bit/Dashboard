@@ -397,6 +397,30 @@ async function loadLiveBusinessRows() {
         AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
           BETWEEN original.started_at - 7 AND original.started_at + 7
       GROUP BY original.club
+    ), day_pass_invoice_lines AS (
+      SELECT club,
+        coalesce(nullif(payload->>'invoice.uid',''),nullif(payload->>'invoice.reference',''),
+          nullif(payload->>'invoice.number',''),
+          concat(coalesce(payload->>'invoice.generatedAt',''),':',coalesce(contact_uid,''))) invoice_key,
+        bool_or(${productCode} IN ('sesion','session')
+          AND ${productName}!~'(coaching|tie)'
+          AND coalesce(nullif(payload->>'priceTI','')::numeric,0) > 0) has_day_pass,
+        bool_or(${productCode} IN ('sesion','session') AND (
+          ${productName}~'(descuento|discount|remise|geste|gesto|commercial)'
+          OR coalesce(nullif(payload->>'priceTI','')::numeric,0) < 0
+        )) has_commercial_gesture,
+        coalesce(sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
+          * coalesce(nullif(payload->>'quantity','')::numeric,1))
+          FILTER (WHERE ${productCode} IN ('sesion','session')),0) session_net
+      FROM mapped
+      WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
+        AND ${paidInvoiceCondition}
+      GROUP BY club,invoice_key
+    ), day_pass_totals AS (
+      SELECT club,count(*)::int day_passes
+      FROM day_pass_invoice_lines
+      WHERE has_day_pass AND NOT has_commercial_gesture AND session_net > 0
+      GROUP BY club
     ), totals AS (
       SELECT club,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
@@ -424,9 +448,6 @@ async function loadLiveBusinessRows() {
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
             AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
-        coalesce(sum(coalesce(nullif(payload->>'quantity','')::numeric,1)) FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
-          AND ${productCode} IN ('sesion','session') AND ${productName}!~'(descuento|discount|coaching|tie)'
-          AND coalesce(nullif(payload->>'quantity','')::numeric,1) > 0),0) day_passes,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE WHEN club IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
@@ -448,8 +469,9 @@ async function loadLiveBusinessRows() {
     ), tariffs AS (
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
-    ) SELECT t.*,coalesce(fc.formula_changes,0) formula_changes,f.membership_tariffs
-      FROM totals t LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`, [month, today]);
+    ) SELECT t.*,coalesce(dp.day_passes,0) day_passes,coalesce(fc.formula_changes,0) formula_changes,f.membership_tariffs
+      FROM totals t LEFT JOIN day_pass_totals dp USING(club)
+      LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`, [month, today]);
     assertCompleteClubRows(rows, "Negocio SFTP");
     liveBusinessCache = { at: Date.now(), rows };
     return rows;
