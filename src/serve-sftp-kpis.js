@@ -383,8 +383,10 @@ async function loadLiveBusinessRows() {
       WHERE entity='abonnements'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'product.name',payload->>'name',''))
-          ~'(cambio de f[oó]rmula|changement de formule|formula change)'
+        -- Resamania has emitted the offer label under different JSON paths
+        -- across SFTP versions. The row is already narrowed to a new Original
+        -- membership, so inspect the complete payload for the change marker.
+        AND lower(payload::text)~'(cambio de f[oó]rmula|changement de formule|formula change)'
       GROUP BY club
     ), totals AS (
       SELECT club,
