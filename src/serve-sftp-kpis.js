@@ -10,6 +10,10 @@ const clubNames = new Map([
   ["les-arts", "Valencia Les Arts"], ["nuevo-centro", "Valencia Nuevo Centro"], ["ruzafa", "Valencia Ruzafa"],
 ]);
 const expectedClubCodes = new Set(clubNames.keys());
+const sourceClubCodes = new Map([
+  ["barcelona", "BAR"], ["madrid", "OMD"], ["malaga-armengual", "MGA"],
+  ["malaga-soho", "MSO"], ["les-arts", "VLA"], ["nuevo-centro", "ONC"], ["ruzafa", "VAL"],
+]);
 const privateFeedToken = process.env.KPI_PRIVATE_TOKEN ?? "";
 const privateAuthorized = (request) => {
   if (!privateFeedToken) return false;
@@ -675,24 +679,25 @@ const server = http.createServer(async (request, response) => {
       if (!expectedClubCodes.has(club) || !/^\d{4}-\d{2}$/.test(month)) {
         response.statusCode = 400; response.end(JSON.stringify({ error: "Invalid club or month" })); return;
       }
+      const sourceClub = sourceClubCodes.get(club);
       const { rows } = await store.pool.query(`WITH memberships AS (
         SELECT DISTINCT ON (external_uid) external_uid,contact_uid,payload,
           coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') started_at,
           ${canonicalMembershipTariff} tariff
         FROM resamania_sftp_records
-        WHERE entity='abonnements' AND ${mappedClub}=$1
+        WHERE entity='abonnements' AND club_code=$1
           AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') LIKE $2 || '%'
           AND ${membershipProductCode} !~ '(day|jour|dia|sesion|session|vip|admin)'
         ORDER BY external_uid,coalesce(source_updated_at,ingested_at) DESC
       ), free_weekly AS (
         SELECT DISTINCT contact_uid FROM resamania_sftp_records
-        WHERE entity='factures' AND ${mappedClub}=$1
+        WHERE entity='factures' AND club_code=$1
           AND ${productCode}='cdd1' AND ${invoiceDate} LIKE $2 || '%'
           AND ${invoiceState} AND ${paidInvoiceCondition}
           AND coalesce(${taxExclusiveLinePrice},0) <= 0
       ), contacts AS (
         SELECT DISTINCT ON (external_uid) external_uid,payload
-        FROM resamania_sftp_records WHERE entity='contacts' AND ${mappedClub}=$1
+        FROM resamania_sftp_records WHERE entity='contacts' AND club_code=$1
         ORDER BY external_uid,coalesce(source_updated_at,ingested_at) DESC
       )
       SELECT m.external_uid id,m.contact_uid,m.started_at,m.tariff,
@@ -702,7 +707,7 @@ const server = http.createServer(async (request, response) => {
       FROM memberships m LEFT JOIN contacts c ON c.external_uid=m.contact_uid
       WHERE NOT (${membershipProductCode.replaceAll("payload", "m.payload")}='cdd1' AND EXISTS (
         SELECT 1 FROM free_weekly f WHERE f.contact_uid=m.contact_uid
-      )) ORDER BY m.started_at DESC,m.external_uid`, [club, month]);
+      )) ORDER BY m.started_at DESC,m.external_uid`, [sourceClub, month]);
       response.end(JSON.stringify({ club, month, signups: rows.map((row) => ({
         id: row.id, contactUid: row.contact_uid, firstName: row.first_name, lastName: row.last_name,
         email: row.email, tariff: row.tariff, startedAt: row.started_at,
