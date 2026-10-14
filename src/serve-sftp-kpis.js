@@ -45,6 +45,9 @@ END`;
 const taxExclusiveLinePrice = `coalesce(nullif(nullif(payload->>'priceTE','')::numeric,0),
   round(nullif(payload->>'priceTI','')::numeric /
     (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)),0)`;
+const taxInclusiveLinePrice = `coalesce(nullif(payload->>'priceTI','')::numeric,
+  round(nullif(payload->>'priceTE','')::numeric *
+    (1 + coalesce(nullif(payload->>'taxRate','')::numeric,0) / 10000)),0)`;
 const paidInvoiceCondition = `lower(coalesce(payload->>'invoice.financialState',payload->>'financialState',''))='paid'
   AND lower(coalesce(payload->>'invoice.paymentsStatus',payload->>'paymentsStatus','paid'))='paid'`;
 const invoiceDate = `coalesce(payload->>'invoice.generatedAt',payload->>'invoice.createdAt',payload->>'generatedAt',payload->>'createdAt','')`;
@@ -191,7 +194,7 @@ async function aggregate() {
         coalesce(sum((nullif(payload->>'priceTI','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_gross,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $2 || '%' AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
         count(DISTINCT contact_uid) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND ${paidInvoiceCondition}) buyers,
-        coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='merch'),0) merch,
+        coalesce(sum((${taxInclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='merch'),0) merch,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))~'(diet|supp|protein|nutrition)'),0) supplements,
         count(*) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code','')) IN ('sesion','session')) day_passes,
         coalesce(sum((nullif(payload->>'priceTE','')::numeric * coalesce(nullif(payload->>'quantity','')::numeric,1))/100) FILTER (WHERE payload->>'invoice.generatedAt' LIKE $1 || '%' AND lower(coalesce(payload->>'product.code',''))='fianza'),0) deposits,
@@ -504,10 +507,11 @@ async function loadLiveBusinessRows(force = false) {
         bool_or(${productCode} IN ('sesion','session')
           AND ${productName}!~'(coaching|tie)'
           AND coalesce(nullif(payload->>'priceTI','')::numeric,0) > 0) has_day_pass,
-        bool_or(${productCode} IN ('sesion','session') AND (
+        bool_or(
           ${productName}~'(descuento|discount|remise|geste|gesto|commercial)'
+          OR ${productCode}~'(descuento|discount|remise|geste|gesto|commercial)'
           OR coalesce(nullif(payload->>'priceTI','')::numeric,0) < 0
-        )) has_commercial_gesture,
+        ) has_commercial_gesture,
         coalesce(sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
           * coalesce(nullif(payload->>'quantity','')::numeric,1))
           FILTER (WHERE ${productCode} IN ('sesion','session')),0) session_net
@@ -541,7 +545,7 @@ async function loadLiveBusinessRows(force = false) {
             AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_increment,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
-        coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
+        coalesce(sum((${taxInclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
             AND ${paidInvoiceCondition} AND ${productCode}='merch'),0) merch,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
@@ -695,6 +699,8 @@ async function withLiveBusiness(snapshots) {
       return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
+        merchBasis: "facturas-cobradas-sftp-con-iva",
+        dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
         billingBasis: billingBaseline ? "cierre-validado-mas-cobros-sftp" : "cobros-efectivos-sftp-sin-iva",
         billingBaselineThrough: billingBaseline?.through ?? null,
         tariffClassificationBasis: "resamania-sftp-normalizado" },
@@ -725,6 +731,8 @@ async function withLiveBusiness(snapshots) {
       monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
         merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes),
+        merchBasis: "facturas-cobradas-sftp-con-iva",
+        dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
         formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes),
         formulaChangeBasis: baseline.formulaChanges == null ? "resamania-sftp" : "cierre-resamania-mas-incrementales-sftp",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
