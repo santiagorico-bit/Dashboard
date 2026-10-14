@@ -27,8 +27,11 @@ const assertCompleteClubRows = (rows, label) => {
   const missing = [...expectedClubCodes].filter((club) => !received.has(club));
   if (missing.length) throw new Error(`${label} incompleto; faltan: ${missing.join(", ")}`);
 };
-const mappedClub = `CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OMD' THEN 'madrid' WHEN 'MGA' THEN 'malaga-armengual'
-  WHEN 'MSO' THEN 'malaga-soho' WHEN 'VLA' THEN 'les-arts' WHEN 'ONC' THEN 'nuevo-centro' WHEN 'VAL' THEN 'ruzafa' END`;
+const mappedClub = `coalesce(CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OMD' THEN 'madrid' WHEN 'MGA' THEN 'malaga-armengual'
+  WHEN 'MSO' THEN 'malaga-soho' WHEN 'VLA' THEN 'les-arts' WHEN 'ONC' THEN 'nuevo-centro' WHEN 'VAL' THEN 'ruzafa' END,
+  CASE payload->>'club.uid' WHEN 'ESclu3041' THEN 'les-arts' WHEN 'ESclu3042' THEN 'nuevo-centro'
+    WHEN 'ESclu3043' THEN 'ruzafa' WHEN 'ESclu3044' THEN 'madrid' WHEN 'ESclu3045' THEN 'malaga-armengual'
+    WHEN 'ESclu3046' THEN 'barcelona' WHEN 'ESclu3270' THEN 'malaga-soho' END)`;
 const membershipProductCode = `lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))`;
 const canonicalMembershipTariff = `CASE ${membershipProductCode}
   WHEN 'cdi1' THEN 'ON AIR Essential'
@@ -473,7 +476,8 @@ async function loadLiveBusinessRows(force = false) {
     const { rows } = await store.pool.query(`WITH mapped AS NOT MATERIALIZED (
       SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
       FROM resamania_sftp_records
-      WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+      WHERE (club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
+          OR (entity='resiliations' AND payload->>'club.uid' IN ('ESclu3041','ESclu3042','ESclu3043','ESclu3044','ESclu3045','ESclu3046','ESclu3270')))
         AND entity IN ('factures','paiements','resiliations','abonnements')
     ), original_starts AS MATERIALIZED (
       SELECT club,contact_uid,external_uid,
@@ -528,6 +532,18 @@ async function loadLiveBusinessRows(force = false) {
       FROM day_pass_invoice_lines
       WHERE has_day_pass AND NOT has_commercial_gesture AND session_net > 0
       GROUP BY club
+    ), cancellation_daily_rows AS (
+      SELECT club,left(payload->>'cancellationDate',10) cancellation_date,
+        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))::int cancellations
+      FROM mapped
+      WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
+        AND left(payload->>'cancellationDate',10) <= $2
+        AND lower(coalesce(payload->>'state','accepted'))='accepted'
+      GROUP BY club,left(payload->>'cancellationDate',10)
+    ), cancellation_daily AS (
+      SELECT club,jsonb_agg(jsonb_build_object('date',cancellation_date,'count',cancellations)
+        ORDER BY cancellation_date) cancellations_by_day
+      FROM cancellation_daily_rows GROUP BY club
     ), totals AS (
       SELECT club,
         coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
@@ -582,8 +598,10 @@ async function loadLiveBusinessRows(force = false) {
     ), tariffs AS (
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
-    ) SELECT t.*,coalesce(dp.day_passes,0) day_passes,coalesce(fc.formula_changes,0) formula_changes,f.membership_tariffs
+    ) SELECT t.*,coalesce(dp.day_passes,0) day_passes,coalesce(fc.formula_changes,0) formula_changes,
+      coalesce(cd.cancellations_by_day,'[]'::jsonb) cancellations_by_day,f.membership_tariffs
       FROM totals t LEFT JOIN day_pass_totals dp USING(club)
+      LEFT JOIN cancellation_daily cd USING(club)
       LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`, [month, today]);
     assertCompleteClubRows(rows, "Negocio SFTP");
     liveBusinessCache = { at: Date.now(), rows };
@@ -703,6 +721,8 @@ async function withLiveBusiness(snapshots) {
       return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
+        cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
+        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
         merchBasis: "facturas-cobradas-sftp-con-iva",
         dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
         billingBasis: billingBaseline ? "cierre-validado-mas-cobros-sftp" : "cobros-efectivos-sftp-sin-iva",
@@ -739,6 +759,8 @@ async function withLiveBusiness(snapshots) {
         dayPasses: number(baseline.dayPassOpening) + number(row.day_passes),
         merchBasis: baseline.merchOpening == null ? "facturas-cobradas-sftp-con-iva" : "historico-resamania-mas-facturas-cobradas-sftp-con-iva",
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
+        cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
+        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
         formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes),
         formulaChangeBasis: baseline.formulaChanges == null ? "resamania-sftp" : "cierre-resamania-mas-incrementales-sftp",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
