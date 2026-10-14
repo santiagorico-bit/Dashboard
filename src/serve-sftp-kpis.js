@@ -367,7 +367,7 @@ async function loadLiveMembershipRows() {
   const baselineConfig = cutoverBaselines[month];
   const membershipFrom = baselineConfig?.membershipFrom ?? `${month}-01`;
     const { rows } = await store.pool.query(`WITH mapped AS NOT MATERIALIZED (
-      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
+      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload,source_deleted_at
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND entity IN ('abonnements','factures')
@@ -382,6 +382,7 @@ async function loadLiveMembershipRows() {
     ), membership_candidates AS (
       SELECT m.*,
         left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date,
+        ${membershipProductCode} product_code,
         (lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode',''))='cdd1'
           AND EXISTS (SELECT 1 FROM weekly_invoice_net w
             WHERE w.club=m.club AND w.contact_uid=m.contact_uid
@@ -390,17 +391,38 @@ async function loadLiveMembershipRows() {
               AND w.weekly_net <= 0)) free_weekly
       FROM mapped m
       WHERE m.entity='abonnements'
+        AND m.source_deleted_at IS NULL
         AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+    ), formula_changes AS (
+      SELECT DISTINCT current.external_uid
+      FROM membership_candidates current
+      JOIN mapped previous
+        ON previous.entity='abonnements'
+       AND previous.club=current.club
+       AND previous.contact_uid=current.contact_uid
+       AND previous.external_uid<>current.external_uid
+       AND previous.source_deleted_at IS NULL
+      WHERE current.started_date >= $4::date
+        AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date < current.started_date
+        AND coalesce(
+          nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
+          '9999-12-31'::date
+        ) >= current.started_date - 2
     ), memberships AS (
-      SELECT * FROM membership_candidates WHERE NOT free_weekly
+      SELECT current.*
+      FROM membership_candidates current
+      LEFT JOIN formula_changes previous USING(external_uid)
+      WHERE NOT current.free_weekly
+        AND current.product_code <> 'cdd1'
+        AND previous.external_uid IS NULL
     ), free_weekly_totals AS (
-      SELECT club,count(DISTINCT external_uid) FILTER (WHERE started_date < $4::date)::int baseline_free_weekly
+      SELECT club,count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date < $4::date)::int baseline_free_weekly
       FROM membership_candidates WHERE free_weekly GROUP BY club
     ) SELECT club,
-    count(DISTINCT external_uid) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
-    count(DISTINCT external_uid) FILTER (WHERE started_date=$2::date) today,
-    count(DISTINCT external_uid) FILTER (WHERE started_date=$3::date) yesterday,
-    count(DISTINCT external_uid) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$2::date) today,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$3::date) yesterday,
+    count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
     coalesce(max(f.baseline_free_weekly),0)::int baseline_free_weekly
     FROM memberships m LEFT JOIN free_weekly_totals f USING(club) GROUP BY club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
@@ -733,14 +755,30 @@ const server = http.createServer(async (request, response) => {
       }
       const sourceClub = sourceClubCodes.get(club);
       const { rows } = await store.pool.query(`WITH memberships AS (
-        SELECT DISTINCT ON (external_uid) external_uid,contact_uid,payload,
-          coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') started_at,
-          ${canonicalMembershipTariff} tariff
-        FROM resamania_sftp_records
-        WHERE entity='abonnements' AND club_code=$1
-          AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') LIKE $2 || '%'
-          AND ${membershipProductCode} !~ '(day|jour|dia|sesion|session|vip|admin)'
-        ORDER BY external_uid,coalesce(source_updated_at,ingested_at) DESC
+        SELECT DISTINCT ON (current.external_uid) current.external_uid,current.contact_uid,current.payload,
+          coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt','') started_at,
+          ${canonicalMembershipTariff.replaceAll("payload", "current.payload")} tariff
+        FROM resamania_sftp_records current
+        WHERE current.entity='abonnements' AND current.club_code=$1
+          AND current.source_deleted_at IS NULL
+          AND coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt','') LIKE $2 || '%'
+          AND ${membershipProductCode.replaceAll("payload", "current.payload")} <> 'cdd1'
+          AND ${membershipProductCode.replaceAll("payload", "current.payload")} !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+          AND NOT EXISTS (
+            SELECT 1 FROM resamania_sftp_records previous
+            WHERE previous.entity='abonnements'
+              AND previous.club_code=current.club_code
+              AND previous.contact_uid=current.contact_uid
+              AND previous.external_uid<>current.external_uid
+              AND previous.source_deleted_at IS NULL
+              AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date
+                < nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date
+              AND coalesce(
+                nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
+                '9999-12-31'::date
+              ) >= nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date - 2
+          )
+        ORDER BY current.external_uid,coalesce(current.source_updated_at,current.ingested_at) DESC
       ), free_weekly AS (
         SELECT DISTINCT contact_uid FROM resamania_sftp_records
         WHERE entity='factures' AND club_code=$1
