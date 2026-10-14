@@ -396,13 +396,16 @@ async function withLiveMemberships(snapshots) {
     if (!row) return snapshot;
     const baseline = baselineConfig?.clubs[snapshot.club_code];
     const memberships = baseline
-      ? baseline.memberships - number(row.baseline_free_weekly) + number(row.membership_starts)
+      ? baseline.memberships + number(row.membership_starts)
       : number(row.raw_month);
     return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
       yesterday: { ...snapshot.metrics?.yesterday, memberships: number(row.yesterday) },
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
+        sftpMembershipStarts: number(row.membership_starts),
+        sftpExcludedFreeWeekly: number(row.baseline_free_weekly),
+        membershipCountRule: "Fitness KPI close through prior day + SFTP paid membership starts after close; free weekly zero-value gestures excluded",
         memberCountBasis: baseline ? "fitness-kpi-close-plus-sftp-incremental" : "resamania-sftp",
         membershipBaselineThrough: baseline?.businessThrough ?? null },
     } };
