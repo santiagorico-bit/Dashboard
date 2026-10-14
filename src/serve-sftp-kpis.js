@@ -96,6 +96,10 @@ const cutoverBaselines = {
       "les-arts": { memberships: 254, members: 3274, membershipsYesterday: 14, accesses: 12027, businessThrough: "2026-10-13", billing: 53652, cancellations: 141, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Original", memberships: 66 }, { tariff: "ON AIR Essential", memberships: 97 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 14 }, { tariff: "Abono 1 Mes", memberships: 12 }, { tariff: "ON AIR Essential Web", memberships: 33 }, { tariff: "Abono 6 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 6 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "Abono 2 Meses", memberships: 2 }] },
       "nuevo-centro": { memberships: 140, members: 2772, membershipsYesterday: 8, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 6,
+        // Resamania did not send an October INIT for invoice detail. Preserve
+        // the validated Oct 1-6 commercial history, then add every paid SFTP
+        // invoice received from the cut-over onwards.
+        merchOpening: 236.71, dayPassOpening: 13,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 73 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "ON AIR Essential Web", memberships: 20 }, { tariff: "ON AIR Original Web", memberships: 9 }, { tariff: "ON AIR Original", memberships: 28 }, { tariff: "Abono 1 Mes", memberships: 4 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
       ruzafa: { memberships: 168, members: 3625, membershipsYesterday: 18, accesses: 10295, businessThrough: "2026-10-13", billing: 57363, cancellations: 173, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 79 }, { tariff: "ON AIR Original", memberships: 36 }, { tariff: "Abono 1 Mes", memberships: 15 }, { tariff: "ON AIR Original Web", memberships: 15 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra", memberships: 2 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
@@ -730,9 +734,11 @@ async function withLiveBusiness(snapshots) {
       today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
-        merch: number(row.merch), supplements: number(row.supplements), dayPasses: number(row.day_passes),
-        merchBasis: "facturas-cobradas-sftp-con-iva",
-        dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
+        merch: Math.round((number(baseline.merchOpening) + number(row.merch)) * 100) / 100,
+        supplements: number(row.supplements),
+        dayPasses: number(baseline.dayPassOpening) + number(row.day_passes),
+        merchBasis: baseline.merchOpening == null ? "facturas-cobradas-sftp-con-iva" : "historico-resamania-mas-facturas-cobradas-sftp-con-iva",
+        dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes),
         formulaChangeBasis: baseline.formulaChanges == null ? "resamania-sftp" : "cierre-resamania-mas-incrementales-sftp",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
