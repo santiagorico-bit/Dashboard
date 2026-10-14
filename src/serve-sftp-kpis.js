@@ -855,7 +855,9 @@ const server = http.createServer(async (request, response) => {
       response.end(JSON.stringify({ month, clubs: rows })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
-      response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
+      // The process keeps its own short-lived database rollup cache. Do not let
+      // browsers or intermediate CDNs retain an older KPI snapshot on top of it.
+      response.setHeader("cache-control", "no-store, max-age=0");
       const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshotsFast()));
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
