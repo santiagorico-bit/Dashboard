@@ -434,7 +434,7 @@ async function withLiveMemberships(snapshots) {
     if (!row && baseline) return { ...snapshot, metrics: {
       ...snapshot.metrics,
       yesterday: { ...snapshot.metrics?.yesterday, memberships: baseline.membershipsYesterday },
-      monthToDate: { ...snapshot.metrics?.monthToDate, memberships: baseline.memberships, members: baseline.members, membershipTariffs: baseline.tariffs, membershipBaselineThrough: baseline.businessThrough, memberBaselineThrough: baseline.businessThrough, membershipCountRule: "Fitness KPI close through prior day + SFTP paid membership starts after close; free weekly zero-value gestures excluded" },
+      monthToDate: { ...snapshot.metrics?.monthToDate, memberships: baseline.memberships, members: baseline.members, membershipTariffs: baseline.tariffs, membershipBaselineThrough: baseline.businessThrough, memberBaselineThrough: baseline.businessThrough, membershipCountRule: "Fitness KPI close through prior day + SFTP valid starts after close; formula changes and one-week passes excluded" },
       incidences: { ...snapshot.metrics?.incidences, accessesMonth: baseline.accesses },
       commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing } },
     } };
@@ -448,7 +448,7 @@ async function withLiveMemberships(snapshots) {
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
         sftpMembershipStarts: number(row.membership_starts),
         sftpExcludedFreeWeekly: number(row.baseline_free_weekly),
-        membershipCountRule: "Fitness KPI close through prior day + SFTP paid membership starts after close; free weekly zero-value gestures excluded",
+        membershipCountRule: "Fitness KPI close through prior day + SFTP valid starts after close; formula changes and one-week passes excluded",
         memberCountBasis: baseline ? "fitness-kpi-close-plus-sftp-incremental" : "resamania-sftp",
         membershipBaselineThrough: baseline?.businessThrough ?? null },
     } };
