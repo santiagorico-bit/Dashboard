@@ -295,6 +295,31 @@ async function latestSnapshots() {
   return rows;
 }
 
+const snapshotFallback = () => Object.entries(cutoverBaselines[madridDate().slice(0, 7)]?.clubs ?? {}).map(([club_code, baseline]) => ({
+  club_code,
+  club_name: clubNames.get(club_code),
+  snapshot_date: baseline.businessThrough,
+  collected_at: new Date().toISOString(),
+  source: "fitness-kpi-close-fallback",
+  metrics: {
+    monthToDate: { memberships: baseline.memberships, members: baseline.members, billing: baseline.billing, membershipTariffs: baseline.tariffs },
+    incidences: { accessesMonth: baseline.accesses },
+    commercial: { ticket: { billing: baseline.billing, billingTaxExcluded: baseline.billing } },
+  },
+}));
+
+async function latestSnapshotsFast() {
+  try {
+    return await Promise.race([
+      latestSnapshots(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("snapshot query timeout")), 1500)),
+    ]);
+  } catch (error) {
+    console.error(`Snapshot query pending: ${error.message}`);
+    return snapshotFallback();
+  }
+}
+
 let liveMembershipCache = null;
 let liveMembershipRefresh = null;
 let liveBusinessCache = null;
@@ -798,7 +823,7 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/club-kpis") {
       response.setHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
-      const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshots()));
+      const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshotsFast()));
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
       const { rows: history } = await store.pool.query(`SELECT club_code,club_name,snapshot_date::text,collected_at,source,metrics
