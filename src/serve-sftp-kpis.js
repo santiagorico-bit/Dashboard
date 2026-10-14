@@ -370,28 +370,15 @@ async function loadLiveMembershipRows() {
       SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload,source_deleted_at
       FROM resamania_sftp_records
       WHERE club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
-        AND entity IN ('abonnements','factures')
-    ), weekly_invoice_net AS (
-      SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
-        sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
-          * coalesce(nullif(payload->>'quantity','')::numeric,1)) weekly_net
-      FROM mapped
-      WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
-        AND ${invoiceState} AND ${paidInvoiceCondition} AND ${productCode}='cdd1'
-      GROUP BY club,contact_uid,left(${invoiceDate},10)::date
+        AND entity='abonnements'
     ), membership_candidates AS (
       SELECT m.*,
         left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date,
-        ${membershipProductCode} product_code,
-        (lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode',''))='cdd1'
-          AND EXISTS (SELECT 1 FROM weekly_invoice_net w
-            WHERE w.club=m.club AND w.contact_uid=m.contact_uid
-              AND w.invoice_date BETWEEN left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date - 2
-                AND left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date + 2
-              AND w.weekly_net <= 0)) free_weekly
+        ${membershipProductCode} product_code
       FROM mapped m
       WHERE m.entity='abonnements'
         AND m.source_deleted_at IS NULL
+        AND ${membershipProductCode} <> 'cdd1'
         AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
     ), formula_changes AS (
       SELECT DISTINCT current.external_uid
@@ -412,19 +399,14 @@ async function loadLiveMembershipRows() {
       SELECT current.*
       FROM membership_candidates current
       LEFT JOIN formula_changes previous USING(external_uid)
-      WHERE NOT current.free_weekly
-        AND current.product_code <> 'cdd1'
-        AND previous.external_uid IS NULL
-    ), free_weekly_totals AS (
-      SELECT club,count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date < $4::date)::int baseline_free_weekly
-      FROM membership_candidates WHERE free_weekly GROUP BY club
+      WHERE previous.external_uid IS NULL
     ) SELECT club,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$2::date) today,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$3::date) yesterday,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
-    coalesce(max(f.baseline_free_weekly),0)::int baseline_free_weekly
-    FROM memberships m LEFT JOIN free_weekly_totals f USING(club) GROUP BY club`, [month, today, yesterday, membershipFrom]);
+    0::int baseline_free_weekly
+    FROM memberships m GROUP BY club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
