@@ -88,15 +88,15 @@ const cutoverBaselines = {
     membershipFrom: "2026-10-14",
     activeFrom: "2026-10-14",
     clubs: {
-      madrid: { memberships: 194, members: 3718, accesses: 15030, businessThrough: "2026-10-13", billing: 67857, cancellations: 164, formulaChanges: 7,
+      madrid: { memberships: 194, members: 3718, membershipsYesterday: 12, accesses: 15030, businessThrough: "2026-10-13", billing: 67857, cancellations: 164, formulaChanges: 7,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 95 }, { tariff: "ON AIR Original", memberships: 43 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Essential Web", memberships: 16 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
-      "les-arts": { memberships: 254, members: 3274, accesses: 12027, businessThrough: "2026-10-13", billing: 53652, cancellations: 141, formulaChanges: 6,
+      "les-arts": { memberships: 254, members: 3274, membershipsYesterday: 14, accesses: 12027, businessThrough: "2026-10-13", billing: 53652, cancellations: 141, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Original", memberships: 66 }, { tariff: "ON AIR Essential", memberships: 97 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 14 }, { tariff: "Abono 1 Mes", memberships: 12 }, { tariff: "ON AIR Essential Web", memberships: 33 }, { tariff: "Abono 6 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 6 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "Abono 2 Meses", memberships: 2 }] },
-      "nuevo-centro": { memberships: 140, members: 2772, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 6,
+      "nuevo-centro": { memberships: 140, members: 2772, membershipsYesterday: 8, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 73 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "ON AIR Essential Web", memberships: 20 }, { tariff: "ON AIR Original Web", memberships: 9 }, { tariff: "ON AIR Original", memberships: 28 }, { tariff: "Abono 1 Mes", memberships: 4 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
-      ruzafa: { memberships: 168, members: 3625, accesses: 10295, businessThrough: "2026-10-13", billing: 57363, cancellations: 173, formulaChanges: 6,
+      ruzafa: { memberships: 168, members: 3625, membershipsYesterday: 18, accesses: 10295, businessThrough: "2026-10-13", billing: 57363, cancellations: 173, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 79 }, { tariff: "ON AIR Original", memberships: 36 }, { tariff: "Abono 1 Mes", memberships: 15 }, { tariff: "ON AIR Original Web", memberships: 15 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra", memberships: 2 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
-      "malaga-armengual": { memberships: 183, members: 3010, accesses: 9326, businessThrough: "2026-10-13", billing: 42971, cancellations: 109,
+      "malaga-armengual": { memberships: 183, members: 3010, membershipsYesterday: 15, accesses: 9326, businessThrough: "2026-10-13", billing: 42971, cancellations: 109,
         tariffs: [{ tariff: "ON AIR Essential", memberships: 52 }, { tariff: "ON AIR Original", memberships: 78 }, { tariff: "ON AIR Essential Web", memberships: 19 }, { tariff: "ON AIR Ultra Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Original Web", memberships: 12 }, { tariff: "ON AIR Ultra", memberships: 7 }] },
     },
   },
@@ -425,9 +425,11 @@ async function withLiveMemberships(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
     const baseline = baselineConfig?.clubs[snapshot.club_code];
+    const isBaselineYesterday = Boolean(baseline?.businessThrough && baseline.businessThrough === madridDate(new Date(Date.now() - 86_400_000)));
     if (!row && !baseline) return snapshot;
     if (!row && baseline) return { ...snapshot, metrics: {
       ...snapshot.metrics,
+      yesterday: { ...snapshot.metrics?.yesterday, memberships: baseline.membershipsYesterday },
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships: baseline.memberships, members: baseline.members, membershipTariffs: baseline.tariffs, membershipBaselineThrough: baseline.businessThrough, memberBaselineThrough: baseline.businessThrough, membershipCountRule: "Fitness KPI close through prior day + SFTP paid membership starts after close; free weekly zero-value gestures excluded" },
       incidences: { ...snapshot.metrics?.incidences, accessesMonth: baseline.accesses },
       commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing } },
@@ -438,7 +440,7 @@ async function withLiveMemberships(snapshots) {
     return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
-      yesterday: { ...snapshot.metrics?.yesterday, memberships: number(row.yesterday) },
+      yesterday: { ...snapshot.metrics?.yesterday, memberships: isBaselineYesterday ? number(baseline.membershipsYesterday) : number(row.yesterday) },
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
         sftpMembershipStarts: number(row.membership_starts),
         sftpExcludedFreeWeekly: number(row.baseline_free_weekly),
