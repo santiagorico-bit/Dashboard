@@ -389,7 +389,13 @@ async function withLiveMemberships(snapshots) {
   const today = madridDate();
   const month = today.slice(0, 7);
   const baselineConfig = cutoverBaselines[month];
-  const rows = await loadLiveMembershipRows();
+  // The SFTP rollup scans the full export and can take several seconds on a
+  // cold cache. Never block the KPI response on it; refresh it in the
+  // background and use the last complete hourly result until it is ready.
+  if (!liveMembershipCache || Date.now() - liveMembershipCache.at >= 5 * 60_000) {
+    void loadLiveMembershipRows().catch((error) => console.error(`Live membership refresh pending: ${error.message}`));
+  }
+  const rows = liveMembershipCache?.rows ?? [];
   const live = new Map(rows.map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
@@ -589,7 +595,12 @@ async function loadLiveAccessRows() {
 
 async function withLiveBusiness(snapshots) {
   const month = madridDate().slice(0, 7);
-  await Promise.all([loadLiveBusinessRows(), loadLiveAccessRows()]);
+  if (!liveBusinessCache || Date.now() - liveBusinessCache.at >= 5 * 60_000) {
+    void loadLiveBusinessRows().catch((error) => console.error(`Live business refresh pending: ${error.message}`));
+  }
+  if (!liveAccessCache || Date.now() - liveAccessCache.at >= 5 * 60_000) {
+    void loadLiveAccessRows().catch((error) => console.error(`Live access refresh pending: ${error.message}`));
+  }
   const live = new Map((liveBusinessCache?.rows ?? []).map((row) => [row.club, row]));
   const liveAccess = new Map((liveAccessCache?.rows ?? []).map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
