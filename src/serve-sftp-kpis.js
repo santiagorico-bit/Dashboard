@@ -326,6 +326,8 @@ let liveBusinessCache = null;
 let liveBusinessRefresh = null;
 let liveAccessCache = null;
 let liveAccessRefresh = null;
+let lastCompletedSyncAt = null;
+let syncCacheRefresh = null;
 let googleReviewsCache = new Map();
 
 const googleReviewPages = new Map([
@@ -357,8 +359,8 @@ async function refreshGoogleReviews() {
   googleReviewsCache = new Map(entries);
 }
 
-async function loadLiveMembershipRows() {
-  if (liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
+async function loadLiveMembershipRows(force = false) {
+  if (!force && liveMembershipCache && Date.now() - liveMembershipCache.at < 5 * 60_000) return liveMembershipCache.rows;
   if (liveMembershipRefresh) return liveMembershipRefresh;
   liveMembershipRefresh = (async () => {
   const today = madridDate();
@@ -455,8 +457,8 @@ async function withLiveMemberships(snapshots) {
   });
 }
 
-async function loadLiveBusinessRows() {
-  if (liveBusinessCache && Date.now() - liveBusinessCache.at < 5 * 60_000) return liveBusinessCache.rows;
+async function loadLiveBusinessRows(force = false) {
+  if (!force && liveBusinessCache && Date.now() - liveBusinessCache.at < 5 * 60_000) return liveBusinessCache.rows;
   if (liveBusinessRefresh) return liveBusinessRefresh;
   liveBusinessRefresh = (async () => {
     const today = madridDate();
@@ -585,8 +587,8 @@ async function loadLiveBusinessRows() {
   return liveBusinessRefresh;
 }
 
-async function loadLiveAccessRows() {
-  if (liveAccessCache && Date.now() - liveAccessCache.at < 55 * 60_000) return liveAccessCache.rows;
+async function loadLiveAccessRows(force = false) {
+  if (!force && liveAccessCache && Date.now() - liveAccessCache.at < 55 * 60_000) return liveAccessCache.rows;
   if (liveAccessRefresh) return liveAccessRefresh;
   liveAccessRefresh = (async () => {
     const month = madridDate().slice(0, 7);
@@ -628,6 +630,28 @@ async function loadLiveAccessRows() {
     return liveAccessCache?.rows ?? [];
   }).finally(() => { liveAccessRefresh = null; });
   return liveAccessRefresh;
+}
+
+async function refreshCachesAfterSftpSync() {
+  if (syncCacheRefresh) return syncCacheRefresh;
+  syncCacheRefresh = (async () => {
+    const { rows } = await store.pool.query(`SELECT completed_at::text completed_at
+      FROM resamania_sync_runs
+      WHERE status IN ('completed','partial') AND completed_at IS NOT NULL
+      ORDER BY completed_at DESC LIMIT 1`);
+    const completedAt = rows[0]?.completed_at ?? null;
+    if (!completedAt || completedAt === lastCompletedSyncAt) return;
+    await Promise.all([
+      loadLiveMembershipRows(true),
+      loadLiveBusinessRows(true),
+      loadLiveAccessRows(true),
+    ]);
+    lastCompletedSyncAt = completedAt;
+    console.log(`KPI caches refreshed after SFTP sync ${completedAt}`);
+  })().catch((error) => {
+    console.error(`SFTP cache refresh pending: ${error.message}`);
+  }).finally(() => { syncCacheRefresh = null; });
+  return syncCacheRefresh;
 }
 
 async function withLiveBusiness(snapshots) {
@@ -874,6 +898,8 @@ const server = http.createServer(async (request, response) => {
 const port = Number(process.env.PORT || 10000);
 void refreshGoogleReviews();
 setInterval(() => void refreshGoogleReviews(), 7 * 24 * 60 * 60_000).unref();
+void refreshCachesAfterSftpSync();
+setInterval(() => void refreshCachesAfterSftpSync(), 15_000).unref();
 server.listen(port, "0.0.0.0", () => console.log(`KPI feed listening on ${port}`));
 await importLegacyHistory();
 setInterval(importLegacyHistory, 15 * 60_000).unref();
