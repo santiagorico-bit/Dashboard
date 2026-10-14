@@ -424,8 +424,14 @@ async function withLiveMemberships(snapshots) {
   const live = new Map(rows.map((row) => [row.club, row]));
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
-    if (!row) return snapshot;
     const baseline = baselineConfig?.clubs[snapshot.club_code];
+    if (!row && !baseline) return snapshot;
+    if (!row && baseline) return { ...snapshot, metrics: {
+      ...snapshot.metrics,
+      monthToDate: { ...snapshot.metrics?.monthToDate, memberships: baseline.memberships, members: baseline.members, membershipTariffs: baseline.tariffs, membershipBaselineThrough: baseline.businessThrough, memberBaselineThrough: baseline.businessThrough, membershipCountRule: "Fitness KPI close through prior day + SFTP paid membership starts after close; free weekly zero-value gestures excluded" },
+      incidences: { ...snapshot.metrics?.incidences, accessesMonth: baseline.accesses },
+      commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing } },
+    } };
     const memberships = baseline
       ? baseline.memberships + number(row.membership_starts)
       : number(row.raw_month);
@@ -632,8 +638,13 @@ async function withLiveBusiness(snapshots) {
     const row = live.get(snapshot.club_code);
     // Never replace a valid, persisted snapshot with a partial rollup. A
     // completed seven-club batch is required before live business values win.
-    if (!row) return snapshot;
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
+    if (!row && !baseline) return snapshot;
+    if (!row && baseline) return { ...snapshot, metrics: {
+      ...snapshot.metrics,
+      monthToDate: { ...snapshot.metrics?.monthToDate, billing: baseline.billing, billingBasis: "fitness-kpi-close-fallback", billingBaselineThrough: baseline.businessThrough },
+      commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing, taxBasis: "Fitness KPI validated close" } },
+    } };
     const billingBaseline = baseline?.businessThrough
       ? { through: baseline.businessThrough, billing: baseline.billing }
       : billingCutoverBaselines[month]?.[snapshot.club_code];
