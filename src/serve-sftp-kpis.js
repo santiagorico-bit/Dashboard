@@ -85,19 +85,19 @@ const completeTariffCutover = (tariffs, target) => {
 const cutoverBaselines = {
   "2026-10": {
     // Authoritative Fitness KPI close captured after the end of October 12.
-    membershipFrom: "2026-10-13",
-    activeFrom: "2026-10-13",
+    membershipFrom: "2026-10-14",
+    activeFrom: "2026-10-14",
     clubs: {
-      madrid: { memberships: 184, members: 3711, accesses: 15030, businessThrough: "2026-10-12", billing: 67857, cancellations: 164, formulaChanges: 7,
-        tariffs: [{ tariff: "ON AIR Essential", memberships: 60 }, { tariff: "ON AIR Original", memberships: 30 }, { tariff: "ON AIR Original Web", memberships: 17 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 3 }, { tariff: "ON AIR Ultra Web", memberships: 1 }] },
-      "les-arts": { memberships: 241, members: 3264, accesses: 12027, businessThrough: "2026-10-12", billing: 53652, cancellations: 141, formulaChanges: 6,
-        tariffs: [{ tariff: "ON AIR Essential", memberships: 59 }, { tariff: "ON AIR Original", memberships: 45 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "ON AIR Original Web", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 4 }, { tariff: "Abono 2 Meses", memberships: 1 }, { tariff: "Abono 3 Meses", memberships: 1 }] },
-      "nuevo-centro": { memberships: 132, members: 2768, accesses: 7724, businessThrough: "2026-10-12", billing: 35915, cancellations: 163, formulaChanges: 6,
-        tariffs: [{ tariff: "ON AIR Essential", memberships: 26 }, { tariff: "ON AIR Original", memberships: 16 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "Abono 1 Mes", memberships: 2 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Original Web", memberships: 1 }] },
-      ruzafa: { memberships: 153, members: 3612, accesses: 10295, businessThrough: "2026-10-12", billing: 57363, cancellations: 173, formulaChanges: 6,
-        tariffs: [{ tariff: "ON AIR Essential", memberships: 33 }, { tariff: "ON AIR Original", memberships: 19 }, { tariff: "ON AIR Essential Web", memberships: 9 }, { tariff: "ON AIR Original Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Ultra Web", memberships: 4 }, { tariff: "ON AIR Ultra", memberships: 2 }] },
-      "malaga-armengual": { memberships: 169, members: 2999, accesses: 9326, businessThrough: "2026-10-12", billing: 42971, cancellations: 109,
-        tariffs: [] },
+      madrid: { memberships: 194, members: 3718, accesses: 15030, businessThrough: "2026-10-13", billing: 67857, cancellations: 164, formulaChanges: 7,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 95 }, { tariff: "ON AIR Original", memberships: 43 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Essential Web", memberships: 16 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
+      "les-arts": { memberships: 254, members: 3274, accesses: 12027, businessThrough: "2026-10-13", billing: 53652, cancellations: 141, formulaChanges: 6,
+        tariffs: [{ tariff: "ON AIR Original", memberships: 66 }, { tariff: "ON AIR Essential", memberships: 97 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 14 }, { tariff: "Abono 1 Mes", memberships: 12 }, { tariff: "ON AIR Essential Web", memberships: 33 }, { tariff: "Abono 6 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 6 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "Abono 2 Meses", memberships: 2 }] },
+      "nuevo-centro": { memberships: 140, members: 2772, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 6,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 73 }, { tariff: "ON AIR Ultra", memberships: 3 }, { tariff: "ON AIR Essential Web", memberships: 20 }, { tariff: "ON AIR Original Web", memberships: 9 }, { tariff: "ON AIR Original", memberships: 28 }, { tariff: "Abono 1 Mes", memberships: 4 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
+      ruzafa: { memberships: 168, members: 3625, accesses: 10295, businessThrough: "2026-10-13", billing: 57363, cancellations: 173, formulaChanges: 6,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 79 }, { tariff: "ON AIR Original", memberships: 36 }, { tariff: "Abono 1 Mes", memberships: 15 }, { tariff: "ON AIR Original Web", memberships: 15 }, { tariff: "ON AIR Essential Web", memberships: 18 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "ON AIR Ultra", memberships: 2 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
+      "malaga-armengual": { memberships: 183, members: 3010, accesses: 9326, businessThrough: "2026-10-13", billing: 42971, cancellations: 109,
+        tariffs: [{ tariff: "ON AIR Essential", memberships: 52 }, { tariff: "ON AIR Original", memberships: 78 }, { tariff: "ON AIR Essential Web", memberships: 19 }, { tariff: "ON AIR Ultra Web", memberships: 7 }, { tariff: "Abono 1 Mes", memberships: 8 }, { tariff: "ON AIR Original Web", memberships: 12 }, { tariff: "ON AIR Ultra", memberships: 7 }] },
     },
   },
 };
