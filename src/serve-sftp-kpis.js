@@ -33,6 +33,12 @@ const mappedClub = `coalesce(CASE club_code WHEN 'BAR' THEN 'barcelona' WHEN 'OM
     WHEN 'ESclu3043' THEN 'ruzafa' WHEN 'ESclu3044' THEN 'madrid' WHEN 'ESclu3045' THEN 'malaga-armengual'
     WHEN 'ESclu3046' THEN 'barcelona' WHEN 'ESclu3270' THEN 'malaga-soho' END)`;
 const membershipProductCode = `lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))`;
+const membershipDescriptor = `lower(concat_ws(' ',
+  payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',
+  payload->>'product.name',payload->>'productName',payload->>'initialInfo.productName',payload->>'name',
+  payload->>'offer.name',payload->>'offerName',payload->>'initialInfo.offerName'))`;
+const excludedMembershipPattern = `(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)`;
+const formulaChangePattern = `cambio de f[oó]rmula`;
 const canonicalMembershipTariff = `CASE ${membershipProductCode}
   WHEN 'cdi1' THEN 'ON AIR Essential'
   WHEN 'cdi2' THEN 'ON AIR Original'
@@ -386,27 +392,29 @@ async function loadLiveMembershipRows(force = false) {
     ), membership_candidates AS (
       SELECT m.*,
         left(coalesce(m.payload->>'startedAt',m.payload->>'validFrom',m.payload->>'createdAt',''),10)::date started_date,
-        ${membershipProductCode} product_code
+        ${membershipProductCode} product_code,
+        ${membershipDescriptor} descriptor
       FROM mapped m
       WHERE m.entity='abonnements'
         AND m.source_deleted_at IS NULL
         AND ${membershipProductCode} <> 'cdd1'
-        AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND ${membershipDescriptor} !~ '${excludedMembershipPattern}'
     ), formula_changes AS (
       SELECT DISTINCT current.external_uid
       FROM membership_candidates current
-      JOIN mapped previous
-        ON previous.entity='abonnements'
-       AND previous.club=current.club
-       AND previous.contact_uid=current.contact_uid
-       AND previous.external_uid<>current.external_uid
-       AND previous.source_deleted_at IS NULL
       WHERE current.started_date >= $4::date
-        AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date < current.started_date
-        AND coalesce(
-          nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
-          '9999-12-31'::date
-        ) >= current.started_date - 2
+        AND (current.descriptor ~ '${formulaChangePattern}' OR EXISTS (
+          SELECT 1 FROM membership_candidates previous
+          WHERE previous.club=current.club
+            AND previous.contact_uid=current.contact_uid
+            AND previous.external_uid<>current.external_uid
+            AND previous.started_date < current.started_date
+            AND previous.product_code<>current.product_code
+            AND coalesce(
+              nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
+              '9999-12-31'::date
+            ) >= current.started_date - 2
+        ))
     ), memberships AS (
       SELECT current.*
       FROM membership_candidates current
@@ -805,7 +813,8 @@ const server = http.createServer(async (request, response) => {
           AND current.source_deleted_at IS NULL
           AND coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt','') LIKE $2 || '%'
           AND ${membershipProductCode.replaceAll("payload", "current.payload")} <> 'cdd1'
-          AND ${membershipProductCode.replaceAll("payload", "current.payload")} !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+          AND ${membershipDescriptor.replaceAll("payload", "current.payload")} !~ '${excludedMembershipPattern}'
+          AND ${membershipDescriptor.replaceAll("payload", "current.payload")} !~ '${formulaChangePattern}'
           AND NOT EXISTS (
             SELECT 1 FROM resamania_sftp_records previous
             WHERE previous.entity='abonnements'
@@ -813,6 +822,10 @@ const server = http.createServer(async (request, response) => {
               AND previous.contact_uid=current.contact_uid
               AND previous.external_uid<>current.external_uid
               AND previous.source_deleted_at IS NULL
+              AND ${membershipProductCode.replaceAll("payload", "previous.payload")} <> 'cdd1'
+              AND ${membershipDescriptor.replaceAll("payload", "previous.payload")} !~ '${excludedMembershipPattern}'
+              AND ${membershipProductCode.replaceAll("payload", "previous.payload")}
+                <> ${membershipProductCode.replaceAll("payload", "current.payload")}
               AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date
                 < nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date
               AND coalesce(
