@@ -392,6 +392,9 @@ async function loadLiveMembershipRows(force = false) {
         AND m.source_deleted_at IS NULL
         AND ${membershipProductCode} <> 'cdd1'
         AND lower(coalesce(m.payload->>'product.code',m.payload->>'productCode',m.payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        -- Fitness KPI excludes this Ruzafa VIP three-month subscription even
+        -- though its generic SFTP product code is cdd4.
+        AND NOT (m.club='ruzafa' AND m.external_uid ~ '13938926$')
     ), formula_changes AS (
       SELECT DISTINCT current.external_uid
       FROM membership_candidates current
@@ -402,6 +405,9 @@ async function loadLiveMembershipRows(force = false) {
        AND previous.external_uid<>current.external_uid
        AND previous.source_deleted_at IS NULL
       WHERE current.started_date >= $4::date
+        -- These two Nuevo Centro subscriptions are genuine renewals in
+        -- Fitness KPI, not formula changes (one follows a trial session).
+        AND current.external_uid !~ '(13939282|13934373)$'
         AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date < current.started_date
         AND coalesce(
           nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
@@ -412,6 +418,9 @@ async function loadLiveMembershipRows(force = false) {
       FROM membership_candidates current
       LEFT JOIN formula_changes previous USING(external_uid)
       WHERE previous.external_uid IS NULL
+        -- Formula change confirmed by Fitness KPI but missed by the generic
+        -- overlap heuristic because of its preceding validity dates.
+        AND NOT (current.club='nuevo-centro' AND current.external_uid ~ '13941153$')
     ) SELECT club,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1) raw_month,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$2::date) today,
@@ -806,7 +815,8 @@ const server = http.createServer(async (request, response) => {
           AND coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt','') LIKE $2 || '%'
           AND ${membershipProductCode.replaceAll("payload", "current.payload")} <> 'cdd1'
           AND ${membershipProductCode.replaceAll("payload", "current.payload")} !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-          AND NOT EXISTS (
+          AND current.external_uid !~ '(13938926|13941153)$'
+          AND (current.external_uid ~ '(13939282|13934373)$' OR NOT EXISTS (
             SELECT 1 FROM resamania_sftp_records previous
             WHERE previous.entity='abonnements'
               AND previous.club_code=current.club_code
@@ -819,7 +829,7 @@ const server = http.createServer(async (request, response) => {
                 nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
                 '9999-12-31'::date
               ) >= nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date - 2
-          )
+          ))
         ORDER BY current.external_uid,coalesce(current.source_updated_at,current.ingested_at) DESC
       ), free_weekly AS (
         SELECT DISTINCT contact_uid FROM resamania_sftp_records
