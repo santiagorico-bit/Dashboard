@@ -488,26 +488,16 @@ async function loadLiveBusinessRows(force = false) {
       WHERE (club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
           OR (entity='resiliations' AND payload->>'club.uid' IN ('ESclu3041','ESclu3042','ESclu3043','ESclu3044','ESclu3045','ESclu3046','ESclu3270')))
         AND entity IN ('factures','paiements','resiliations','abonnements')
-    ), original_starts AS MATERIALIZED (
-      SELECT club,contact_uid,external_uid,
-        nullif(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),'')::date started_at
+    ), formula_change_starts AS MATERIALIZED (
+      SELECT club,external_uid
       FROM mapped
-      WHERE entity='abonnements' AND contact_uid IS NOT NULL
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
+      WHERE entity='abonnements'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
-          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-12')
+        AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'name',''))
+          ~ 'cambio de f[oó]rmula'
     ), formula_change_totals AS (
-      SELECT original.club,count(DISTINCT original.external_uid) formula_changes
-      FROM original_starts original
-      INNER JOIN mapped previous ON previous.club=original.club
-        AND previous.contact_uid=original.contact_uid
-        AND previous.entity='abonnements' AND previous.external_uid<>original.external_uid
-        AND lower(coalesce(previous.payload->>'product.code',previous.payload->>'productCode',previous.payload->>'initialInfo.productCode',''))<>'cdi2'
-        AND nullif(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),'')::date < original.started_at
-        AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
-          BETWEEN original.started_at - 7 AND original.started_at + 7
-      GROUP BY original.club
+      SELECT club,count(DISTINCT external_uid) formula_changes
+      FROM formula_change_starts GROUP BY club
     ), weekly_invoice_net AS (
       SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
         sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
@@ -770,8 +760,8 @@ async function withLiveBusiness(snapshots) {
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
-        formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes),
-        formulaChangeBasis: baseline.formulaChanges == null ? "resamania-sftp" : "cierre-resamania-mas-incrementales-sftp",
+        formulaChanges: number(row.formula_changes),
+        formulaChangeBasis: "resamania-sftp-etiqueta-cambio-formula",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
