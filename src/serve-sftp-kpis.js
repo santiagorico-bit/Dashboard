@@ -451,14 +451,10 @@ async function withLiveMemberships(snapshots) {
     const row = live.get(snapshot.club_code);
     const baseline = baselineConfig?.clubs[snapshot.club_code];
     const isBaselineYesterday = Boolean(baseline?.businessThrough && baseline.businessThrough === madridDate(new Date(Date.now() - 86_400_000)));
-    if (!row && !baseline) return snapshot;
-    if (!row && baseline) return { ...snapshot, metrics: {
-      ...snapshot.metrics,
-      yesterday: { ...snapshot.metrics?.yesterday, memberships: baseline.membershipsYesterday },
-      monthToDate: { ...snapshot.metrics?.monthToDate, memberships: baseline.memberships, members: baseline.members, membershipTariffs: baseline.tariffs, membershipBaselineThrough: baseline.businessThrough, memberBaselineThrough: baseline.businessThrough, membershipCountRule: "Fitness KPI close through prior day + SFTP valid starts after close; formula changes and one-week passes excluded" },
-      incidences: { ...snapshot.metrics?.incidences, accessesMonth: baseline.accesses },
-      commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing } },
-    } };
+    // On a cold process, keep the last complete persisted snapshot visible.
+    // A cut-over baseline is not a safe substitute for today's completed KPI
+    // row and caused the dashboard to regress after every deployment.
+    if (!row) return snapshot;
     const memberships = baseline
       ? baseline.memberships + number(row.membership_starts)
       : number(row.raw_month);
@@ -707,12 +703,9 @@ async function withLiveBusiness(snapshots) {
     // Never replace a valid, persisted snapshot with a partial rollup. A
     // completed seven-club batch is required before live business values win.
     const baseline = cutoverBaselines[month]?.clubs[snapshot.club_code];
-    if (!row && !baseline) return snapshot;
-    if (!row && baseline) return { ...snapshot, metrics: {
-      ...snapshot.metrics,
-      monthToDate: { ...snapshot.metrics?.monthToDate, billing: baseline.billing, billingBasis: "fitness-kpi-close-fallback", billingBaselineThrough: baseline.businessThrough },
-      commercial: { ...snapshot.metrics?.commercial, ticket: { ...snapshot.metrics?.commercial?.ticket, billing: baseline.billing, billingTaxExcluded: baseline.billing, taxBasis: "Fitness KPI validated close" } },
-    } };
+    // Preserve the last complete persisted row while the live rollup warms.
+    // Never replace it with a partial cut-over baseline.
+    if (!row) return snapshot;
     const billingBaseline = baseline?.businessThrough
       ? { through: baseline.businessThrough, billing: baseline.billing }
       : billingCutoverBaselines[month]?.[snapshot.club_code];
@@ -931,21 +924,9 @@ const server = http.createServer(async (request, response) => {
       // The process keeps its own short-lived database rollup cache. Do not let
       // browsers or intermediate CDNs retain an older KPI snapshot on top of it.
       response.setHeader("cache-control", "no-store, max-age=0");
-      // A Render deploy starts a fresh process. Never answer with the historic
-      // cut-over baselines while the in-memory SFTP rollups are still warming:
-      // wait on the first request, and fail closed if a rollup cannot be built.
-      // React Query will retain the last good screen instead of replacing it
-      // with apparently regressed figures.
-      if (!liveMembershipCache || !liveBusinessCache || !liveAccessCache) {
-        await Promise.all([
-          loadLiveMembershipRows(true),
-          loadLiveBusinessRows(true),
-          loadLiveAccessRows(true),
-        ]);
-        if (!liveMembershipCache || !liveBusinessCache || !liveAccessCache) {
-          throw new Error("KPI rollups are not ready after process startup");
-        }
-      }
+      // Live rollups warm in the background. The request must remain fast so a
+      // fresh browser session can render the last complete persisted snapshot
+      // instead of showing an empty dashboard after a deploy.
       const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshotsFast()));
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
