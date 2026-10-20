@@ -495,17 +495,12 @@ async function loadLiveBusinessRows(force = false) {
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))
           IN ('cdi2','cdi3')
     ), formula_change_totals AS (
+      -- Resamania marks upgrades from Essential ("Clásica") explicitly on
+      -- the new Original/Ultra subscription. The previous Essential row is
+      -- not reliably retained in every incremental SFTP export, so requiring
+      -- that row made every valid upgrade disappear after a refresh.
       SELECT changed.club,count(DISTINCT changed.external_uid) formula_changes
       FROM formula_change_starts changed
-      WHERE EXISTS (
-        SELECT 1 FROM mapped previous
-        WHERE previous.club=changed.club AND previous.contact_uid=changed.contact_uid
-          AND previous.entity='abonnements' AND previous.external_uid<>changed.external_uid
-          AND lower(coalesce(previous.payload->>'product.code',previous.payload->>'productCode',previous.payload->>'initialInfo.productCode',''))='cdi1'
-          AND nullif(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),'')::date < changed.started_at
-          AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
-            BETWEEN changed.started_at - 7 AND changed.started_at + 7
-      )
       GROUP BY changed.club
     ), weekly_invoice_net AS (
       SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
