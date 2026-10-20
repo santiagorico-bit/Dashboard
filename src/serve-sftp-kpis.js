@@ -931,6 +931,21 @@ const server = http.createServer(async (request, response) => {
       // The process keeps its own short-lived database rollup cache. Do not let
       // browsers or intermediate CDNs retain an older KPI snapshot on top of it.
       response.setHeader("cache-control", "no-store, max-age=0");
+      // A Render deploy starts a fresh process. Never answer with the historic
+      // cut-over baselines while the in-memory SFTP rollups are still warming:
+      // wait on the first request, and fail closed if a rollup cannot be built.
+      // React Query will retain the last good screen instead of replacing it
+      // with apparently regressed figures.
+      if (!liveMembershipCache || !liveBusinessCache || !liveAccessCache) {
+        await Promise.all([
+          loadLiveMembershipRows(true),
+          loadLiveBusinessRows(true),
+          loadLiveAccessRows(true),
+        ]);
+        if (!liveMembershipCache || !liveBusinessCache || !liveAccessCache) {
+          throw new Error("KPI rollups are not ready after process startup");
+        }
+      }
       const current = await withLiveBusiness(await withLiveMemberships(await latestSnapshotsFast()));
       const historyRequested = new URL(request.url, "http://localhost").searchParams.get("history") === "1";
       if (!historyRequested) { response.end(JSON.stringify({ clubs: current })); return; }
