@@ -98,7 +98,7 @@ const cutoverBaselines = {
         tariffs: [{ tariff: "ON AIR Essential", memberships: 95 }, { tariff: "ON AIR Original", memberships: 43 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 11 }, { tariff: "Abono 1 Mes", memberships: 5 }, { tariff: "ON AIR Essential Web", memberships: 16 }, { tariff: "ON AIR Ultra Web", memberships: 2 }] },
       "les-arts": { memberships: 254, members: 3274, membershipsYesterday: 14, accesses: 12027, businessThrough: "2026-10-13", billing: 53652, cancellations: 141, formulaChanges: 6,
         tariffs: [{ tariff: "ON AIR Original", memberships: 66 }, { tariff: "ON AIR Essential", memberships: 97 }, { tariff: "ON AIR Original Web", memberships: 22 }, { tariff: "ON AIR Ultra", memberships: 14 }, { tariff: "Abono 1 Mes", memberships: 12 }, { tariff: "ON AIR Essential Web", memberships: 33 }, { tariff: "Abono 6 Meses", memberships: 1 }, { tariff: "ON AIR Ultra Web", memberships: 6 }, { tariff: "Abono 3 Meses", memberships: 1 }, { tariff: "Abono 2 Meses", memberships: 2 }] },
-      "nuevo-centro": { memberships: 140, members: 2772, membershipsYesterday: 8, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 6,
+      "nuevo-centro": { memberships: 140, members: 2772, membershipsYesterday: 8, accesses: 7724, businessThrough: "2026-10-13", billing: 35915, cancellations: 163, formulaChanges: 14,
         // Resamania did not send an October INIT for invoice detail. Preserve
         // the validated Oct 1-6 commercial history, then add every paid SFTP
         // invoice received from the cut-over onwards.
@@ -764,7 +764,9 @@ async function withLiveBusiness(snapshots) {
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
-        formulaChanges: number(row.formula_changes),
+        // Never regress below the last Resamania-audited close while SFTP
+        // incrementals are still rebuilding their offer evidence.
+        formulaChanges: Math.max(number(baseline.formulaChanges), number(row.formula_changes)),
         formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
