@@ -490,7 +490,10 @@ async function loadLiveBusinessRows(force = false) {
       FROM mapped
       WHERE entity='abonnements' AND contact_uid IS NOT NULL
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'name',''))
+        AND lower(coalesce(
+          payload->>'initialInfo.offerName',payload->>'offerName',payload->>'offer.name',
+          payload->>'offre.name',payload->>'oferta.nombre',payload#>>'{initialInfo,offerName}',
+          payload#>>'{offer,name}',payload#>>'{offre,name}',payload->>'name',''))
           ~ 'cambio de f[oó]rmula'
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))
           IN ('cdi2','cdi3')

@@ -44,3 +44,17 @@ test("keeps non-personal membership validity fields", () => {
     terminationDate: "", valid: "true",
   });
 });
+
+test("keeps the non-personal offer label required for formula-change audits", () => {
+  const payload = safePayload({
+    uid: "sub-2",
+    productCode: "cdi3",
+    offerName: "ON AIR Ultra - Cambio de fórmula Clásica",
+    email: "private@example.com",
+  }, "abonnements");
+  assert.deepEqual(payload, {
+    uid: "sub-2",
+    productCode: "cdi3",
+    offerName: "ON AIR Ultra - Cambio de fórmula Clásica",
+  });
+});
