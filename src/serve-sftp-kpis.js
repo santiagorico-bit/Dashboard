@@ -633,15 +633,15 @@ async function loadLiveAccessRows(force = false) {
         AND lower(coalesce(payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
       GROUP BY 1
     ), cancellation_contacts AS (
-      SELECT club_code,contact_uid
+      SELECT club_code,${mappedClub} club,contact_uid
       FROM resamania_sftp_records
       WHERE entity='resiliations' AND source_deleted_at IS NULL
         AND club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
         AND payload->>'cancellationDate' LIKE $1 || '%'
         AND lower(coalesce(payload->>'state','accepted'))='accepted'
-      GROUP BY 1,2
+      GROUP BY 1,2,3
     ), cancellation_accesses AS (
-      SELECT ${mappedClub.replaceAll("club_code", "c.club_code")} club,avg(p.accesses) average_cancellation_accesses
+      SELECT c.club,avg(p.accesses) average_cancellation_accesses
       FROM cancellation_contacts c CROSS JOIN LATERAL (
         SELECT count(DISTINCT external_uid)::numeric accesses FROM resamania_sftp_records p
         WHERE p.entity='passages' AND p.club_code=c.club_code AND p.contact_uid=c.contact_uid
@@ -649,7 +649,7 @@ async function loadLiveAccessRows(force = false) {
           AND lower(coalesce(p.payload->>'entryAuthorized','false'))='true'
           AND lower(coalesce(p.payload->>'entryReason',''))!~'(exit|sortie)'
           AND lower(coalesce(p.payload->>'crossingPoint.name',''))!~'(salida|sortie|exit|visbody|sismo)'
-      ) p GROUP BY 1
+      ) p GROUP BY c.club
     ) SELECT a.*,c.average_cancellation_accesses FROM access_totals a LEFT JOIN cancellation_accesses c USING(club)`, [month]);
     assertCompleteClubRows(rows, "Accesos SFTP");
     liveAccessCache = { at: Date.now(), rows };
@@ -782,7 +782,9 @@ const server = http.createServer(async (request, response) => {
   response.setHeader("content-type", "application/json; charset=utf-8");
   try {
     if (request.method === "GET" && request.url?.split("?")[0] === "/health") {
-      response.end(JSON.stringify({ ok: true, service: "onair-kpi-feed", at: new Date().toISOString() })); return;
+      const ready = Boolean(liveMembershipCache && liveBusinessCache && liveAccessCache);
+      response.statusCode = ready ? 200 : 503;
+      response.end(JSON.stringify({ ok: ready, ready, service: "onair-kpi-feed", at: new Date().toISOString() })); return;
     }
     if (request.method === "GET" && request.url?.split("?")[0] === "/private/signups") {
       response.setHeader("cache-control", "private, no-store");
