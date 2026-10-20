@@ -488,26 +488,18 @@ async function loadLiveBusinessRows(force = false) {
       WHERE (club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
           OR (entity='resiliations' AND payload->>'club.uid' IN ('ESclu3041','ESclu3042','ESclu3043','ESclu3044','ESclu3045','ESclu3046','ESclu3270')))
         AND entity IN ('factures','paiements','resiliations','abonnements')
-    ), original_starts AS MATERIALIZED (
-      SELECT club,contact_uid,external_uid,
-        nullif(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),'')::date started_at
+    ), formula_change_starts AS MATERIALIZED (
+      SELECT club,external_uid
       FROM mapped
-      WHERE entity='abonnements' AND contact_uid IS NOT NULL
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdi2'
+      WHERE entity='abonnements'
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
+        AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'name',''))
+          ~ 'cambio de f[oó]rmula'
         AND (club NOT IN ('madrid','les-arts','nuevo-centro','ruzafa')
-          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-12')
+          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-13')
     ), formula_change_totals AS (
-      SELECT original.club,count(DISTINCT original.external_uid) formula_changes
-      FROM original_starts original
-      INNER JOIN mapped previous ON previous.club=original.club
-        AND previous.contact_uid=original.contact_uid
-        AND previous.entity='abonnements' AND previous.external_uid<>original.external_uid
-        AND lower(coalesce(previous.payload->>'product.code',previous.payload->>'productCode',previous.payload->>'initialInfo.productCode',''))<>'cdi2'
-        AND nullif(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),'')::date < original.started_at
-        AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
-          BETWEEN original.started_at - 7 AND original.started_at + 7
-      GROUP BY original.club
+      SELECT club,count(DISTINCT external_uid) formula_changes
+      FROM formula_change_starts GROUP BY club
     ), weekly_invoice_net AS (
       SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
         sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
@@ -576,7 +568,8 @@ async function loadLiveBusinessRows(force = false) {
           FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
         coalesce(sum((${taxInclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
-            AND ${paidInvoiceCondition} AND ${productCode}='merch'),0) merch,
+            AND ${paidInvoiceCondition} AND ${productCode}='merch'
+            AND (club<>'nuevo-centro' OR left(${invoiceDate},10)>'2026-10-06')),0) merch,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
             AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
