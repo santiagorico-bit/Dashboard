@@ -489,15 +489,28 @@ async function loadLiveBusinessRows(force = false) {
           OR (entity='resiliations' AND payload->>'club.uid' IN ('ESclu3041','ESclu3042','ESclu3043','ESclu3044','ESclu3045','ESclu3046','ESclu3270')))
         AND entity IN ('factures','paiements','resiliations','abonnements')
     ), formula_change_starts AS MATERIALIZED (
-      SELECT club,external_uid
+      SELECT club,contact_uid,external_uid,
+        nullif(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),'')::date started_at
       FROM mapped
-      WHERE entity='abonnements'
+      WHERE entity='abonnements' AND contact_uid IS NOT NULL
         AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
         AND lower(coalesce(payload->>'initialInfo.offerName',payload->>'offerName',payload->>'name',''))
           ~ 'cambio de f[oó]rmula'
+        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))
+          IN ('cdi2','cdi3')
     ), formula_change_totals AS (
-      SELECT club,count(DISTINCT external_uid) formula_changes
-      FROM formula_change_starts GROUP BY club
+      SELECT changed.club,count(DISTINCT changed.external_uid) formula_changes
+      FROM formula_change_starts changed
+      WHERE EXISTS (
+        SELECT 1 FROM mapped previous
+        WHERE previous.club=changed.club AND previous.contact_uid=changed.contact_uid
+          AND previous.entity='abonnements' AND previous.external_uid<>changed.external_uid
+          AND lower(coalesce(previous.payload->>'product.code',previous.payload->>'productCode',previous.payload->>'initialInfo.productCode',''))='cdi1'
+          AND nullif(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),'')::date < changed.started_at
+          AND nullif(coalesce(previous.payload->>'terminatedAt',previous.payload->>'cancelledAt',previous.payload->>'validThrough',''),'')::date
+            BETWEEN changed.started_at - 7 AND changed.started_at + 7
+      )
+      GROUP BY changed.club
     ), weekly_invoice_net AS (
       SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
         sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
@@ -761,7 +774,7 @@ async function withLiveBusiness(snapshots) {
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
         formulaChanges: number(row.formula_changes),
-        formulaChangeBasis: "resamania-sftp-etiqueta-cambio-formula",
+        formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
       commercial: { ...snapshot.metrics?.commercial,
