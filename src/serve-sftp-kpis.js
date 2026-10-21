@@ -119,6 +119,22 @@ const billingCutoverBaselines = {
   },
 };
 
+// Fitness KPI is the authoritative daily close. Preserve audited differences
+// when an SFTP delivery is incomplete or one record is classified differently.
+// `delta` is also carried into the month total on subsequent days.
+const auditedMembershipCloses = {
+  "2026-10-20": {
+    madrid: { memberships: 27, delta: 3 },
+    "les-arts": { memberships: 29, delta: 8 },
+    "nuevo-centro": { memberships: 8, delta: 0 },
+    ruzafa: { memberships: 16, delta: 1 },
+  },
+};
+
+const auditedMembershipDelta = (club, from, through) => Object.entries(auditedMembershipCloses)
+  .filter(([date]) => date >= from && date <= through)
+  .reduce((sum, [, clubs]) => sum + number(clubs[club]?.delta), 0);
+
 async function importLegacyHistory() {
   const endpoint = process.env.LEGACY_KPI_FEED_URL;
   if (!endpoint) return;
@@ -438,6 +454,7 @@ async function loadLiveMembershipRows(force = false) {
 async function withLiveMemberships(snapshots) {
   const today = madridDate();
   const month = today.slice(0, 7);
+  const yesterday = madridDate(new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000));
   const baselineConfig = cutoverBaselines[month];
   // The SFTP rollup scans the full export and can take several seconds on a
   // cold cache. Never block the KPI response on it; refresh it in the
@@ -450,18 +467,19 @@ async function withLiveMemberships(snapshots) {
   return snapshots.map((snapshot) => {
     const row = live.get(snapshot.club_code);
     const baseline = baselineConfig?.clubs[snapshot.club_code];
+    const auditedYesterday = auditedMembershipCloses[yesterday]?.[snapshot.club_code];
     const isBaselineYesterday = Boolean(baseline?.businessThrough && baseline.businessThrough === madridDate(new Date(Date.now() - 86_400_000)));
     // On a cold process, keep the last complete persisted snapshot visible.
     // A cut-over baseline is not a safe substitute for today's completed KPI
     // row and caused the dashboard to regress after every deployment.
     if (!row) return snapshot;
     const memberships = baseline
-      ? baseline.memberships + number(row.membership_starts)
+      ? baseline.memberships + number(row.membership_starts) + auditedMembershipDelta(snapshot.club_code, baselineConfig.membershipFrom, today)
       : number(row.raw_month);
     return { ...snapshot, collected_at: new Date().toISOString(), metrics: {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
-      yesterday: { ...snapshot.metrics?.yesterday, memberships: isBaselineYesterday ? number(baseline.membershipsYesterday) : number(row.yesterday) },
+      yesterday: { ...snapshot.metrics?.yesterday, memberships: auditedYesterday?.memberships ?? (isBaselineYesterday ? number(baseline.membershipsYesterday) : number(row.yesterday)) },
       monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
         sftpMembershipStarts: number(row.membership_starts),
         sftpExcludedFreeWeekly: number(row.baseline_free_weekly),
