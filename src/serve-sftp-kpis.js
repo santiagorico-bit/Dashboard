@@ -129,6 +129,11 @@ const auditedMembershipCloses = {
     "nuevo-centro": { memberships: 8, delta: 0 },
     ruzafa: { memberships: 16, delta: 1 },
   },
+  "2026-10-21": {
+    madrid: { memberships: 21, delta: 1 },
+    "les-arts": { memberships: 34, delta: 8 },
+    "nuevo-centro": { memberships: 6, delta: -1 },
+  },
 };
 
 const auditedMembershipDelta = (club, from, through) => Object.entries(auditedMembershipCloses)
