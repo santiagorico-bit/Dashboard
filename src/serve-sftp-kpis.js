@@ -119,22 +119,11 @@ const billingCutoverBaselines = {
   },
 };
 
-// Fitness KPI is the authoritative daily close. Preserve audited differences
-// when an SFTP delivery is incomplete or one record is classified differently.
-// `delta` is also carried into the month total on subsequent days.
-const auditedMembershipCloses = {
-  "2026-10-20": {
-    madrid: { memberships: 27, delta: 3 },
-    "les-arts": { memberships: 29, delta: 8 },
-    "nuevo-centro": { memberships: 8, delta: 0 },
-    ruzafa: { memberships: 16, delta: 1 },
-  },
-  "2026-10-21": {
-    madrid: { memberships: 21, delta: 1 },
-    "les-arts": { memberships: 34, delta: 8 },
-    "nuevo-centro": { memberships: 6, delta: -1 },
-  },
-};
+// The suite's commercial signup criterion is authoritative: trial sessions,
+// one-week passes and formula changes are never memberships. Do not carry
+// Fitness KPI close adjustments into the SFTP total because that source also
+// classifies trial sessions as signups.
+const auditedMembershipCloses = {};
 
 const auditedMembershipDelta = (club, from, through) => Object.entries(auditedMembershipCloses)
   .filter(([date]) => date >= from && date <= through)
