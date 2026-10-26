@@ -491,30 +491,41 @@ async function loadLiveBusinessRows(force = false) {
     const today = madridDate();
     const month = today.slice(0, 7);
     const { rows } = await store.pool.query(`WITH mapped AS NOT MATERIALIZED (
-      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload
+      SELECT ${mappedClub} club,entity,external_uid,contact_uid,payload,source_deleted_at
       FROM resamania_sftp_records
       WHERE (club_code IN ('BAR','OMD','MGA','MSO','VLA','ONC','VAL')
           OR (entity='resiliations' AND payload->>'club.uid' IN ('ESclu3041','ESclu3042','ESclu3043','ESclu3044','ESclu3045','ESclu3046','ESclu3270')))
         AND entity IN ('factures','paiements','resiliations','abonnements')
-    ), formula_change_starts AS MATERIALIZED (
-      SELECT club,contact_uid,external_uid,
-        nullif(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),'')::date started_at
+    ), formula_memberships AS MATERIALIZED (
+      SELECT club,contact_uid,external_uid,source_deleted_at,
+        lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) product_code,
+        nullif(left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10),'')::date started_at,
+        coalesce(
+          nullif(left(coalesce(payload->>'terminatedAt',payload->>'validThrough',payload->>'endedAt',''),10),'')::date,
+          '9999-12-31'::date
+        ) ended_at
       FROM mapped
       WHERE entity='abonnements' AND contact_uid IS NOT NULL
-        AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND lower(coalesce(
-          payload->>'initialInfo.offerName',payload->>'offerName',payload->>'offer.name',
-          payload->>'offre.name',payload->>'oferta.nombre',payload#>>'{initialInfo,offerName}',
-          payload#>>'{offer,name}',payload#>>'{offre,name}',payload->>'name',''))
-          ~ 'cambio de f[oó]rmula'
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))
-          IN ('cdi2','cdi3')
+    ), formula_change_starts AS MATERIALIZED (
+      SELECT DISTINCT current.club,current.contact_uid,current.external_uid,current.started_at
+      FROM formula_memberships current
+      JOIN formula_memberships previous
+        ON previous.club=current.club
+       AND previous.contact_uid=current.contact_uid
+       AND previous.external_uid<>current.external_uid
+       AND previous.product_code='cdi1'
+       AND previous.source_deleted_at IS NULL
+       AND previous.started_at<current.started_at
+       AND previous.ended_at>=current.started_at-2
+      WHERE current.source_deleted_at IS NULL
+        AND current.product_code IN ('cdi2','cdi3')
+        AND to_char(current.started_at,'YYYY-MM')=$1
     ), formula_change_totals AS (
-      -- Resamania marks upgrades from Essential ("Clásica") explicitly on
-      -- the new Original/Ultra subscription. The previous Essential row is
-      -- not reliably retained in every incremental SFTP export, so requiring
-      -- that row made every valid upgrade disappear after a refresh.
-      SELECT changed.club,count(DISTINCT changed.external_uid) formula_changes
+      -- Incremental exports no longer retain the textual "Cambio de fórmula"
+      -- offer label. Derive the commercial upgrade from the actual transition:
+      -- Essential (cdi1) -> Original/Ultra (cdi2/cdi3) for the same member.
+      SELECT changed.club,count(DISTINCT changed.external_uid) formula_changes,
+        count(DISTINCT changed.external_uid) FILTER (WHERE changed.started_at >= $3::date) formula_changes_increment
       FROM formula_change_starts changed
       GROUP BY changed.club
     ), weekly_invoice_net AS (
@@ -617,10 +628,12 @@ async function loadLiveBusinessRows(force = false) {
       SELECT club,jsonb_agg(jsonb_build_object('tariff',tariff,'memberships',memberships) ORDER BY memberships DESC) membership_tariffs
       FROM tariff_rows GROUP BY club
     ) SELECT t.*,coalesce(dp.day_passes,0) day_passes,coalesce(fc.formula_changes,0) formula_changes,
+      coalesce(fc.formula_changes_increment,0) formula_changes_increment,
       coalesce(cd.cancellations_by_day,'[]'::jsonb) cancellations_by_day,f.membership_tariffs
       FROM totals t LEFT JOIN day_pass_totals dp USING(club)
       LEFT JOIN cancellation_daily cd USING(club)
-      LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`, [month, today]);
+      LEFT JOIN formula_change_totals fc USING(club) LEFT JOIN tariffs f USING(club)`,
+      [month, today, cutoverBaselines[month]?.activeFrom ?? `${month}-01`]);
     assertCompleteClubRows(rows, "Negocio SFTP");
     liveBusinessCache = { at: Date.now(), rows };
     return rows;
@@ -776,9 +789,7 @@ async function withLiveBusiness(snapshots) {
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
-        // Never regress below the last Resamania-audited close while SFTP
-        // incrementals are still rebuilding their offer evidence.
-        formulaChanges: Math.max(number(baseline.formulaChanges), number(row.formula_changes)),
+        formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes_increment),
         formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
