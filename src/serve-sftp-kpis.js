@@ -528,14 +528,6 @@ async function loadLiveBusinessRows(force = false) {
         count(DISTINCT changed.external_uid) FILTER (WHERE changed.started_at >= $3::date) formula_changes_increment
       FROM formula_change_starts changed
       GROUP BY changed.club
-    ), weekly_invoice_net AS (
-      SELECT club,contact_uid,left(${invoiceDate},10)::date invoice_date,
-        sum(coalesce(nullif(payload->>'priceTI','')::numeric,0)
-          * coalesce(nullif(payload->>'quantity','')::numeric,1)) weekly_net
-      FROM mapped
-      WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
-        AND ${invoiceState} AND ${paidInvoiceCondition} AND ${productCode}='cdd1'
-      GROUP BY club,contact_uid,left(${invoiceDate},10)::date
     ), day_pass_invoice_lines AS (
       SELECT club,
         coalesce(nullif(payload->>'invoice.uid',''),nullif(payload->>'invoice.reference',''),
@@ -595,19 +587,34 @@ async function loadLiveBusinessRows(force = false) {
           FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
       FROM mapped GROUP BY club
     ), tariff_contacts AS (
-      SELECT DISTINCT ON (club,external_uid)
-        club,external_uid membership_key,${canonicalMembershipTariff} tariff
-      FROM mapped WHERE entity='abonnements' AND left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),7)=$1
-        AND (club NOT IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa')
-          OR left(coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt',''),10) > '2026-10-12')
-        AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
-        AND NOT (lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode',''))='cdd1'
-          AND EXISTS (SELECT 1 FROM weekly_invoice_net w
-            WHERE w.club=mapped.club AND w.contact_uid=mapped.contact_uid
-              AND w.invoice_date BETWEEN left(coalesce(mapped.payload->>'startedAt',mapped.payload->>'validFrom',mapped.payload->>'createdAt',''),10)::date - 2
-                AND left(coalesce(mapped.payload->>'startedAt',mapped.payload->>'validFrom',mapped.payload->>'createdAt',''),10)::date + 2
-              AND w.weekly_net <= 0))
-      ORDER BY club,external_uid,coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'createdAt','') DESC
+      SELECT DISTINCT ON (current.club,coalesce(current.contact_uid,current.external_uid))
+        current.club,coalesce(current.contact_uid,current.external_uid) membership_key,
+        ${canonicalMembershipTariff.replaceAll("payload", "current.payload")} tariff
+      FROM mapped current
+      WHERE current.entity='abonnements' AND current.source_deleted_at IS NULL
+        AND left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),7)=$1
+        AND (current.club NOT IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa')
+          OR left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10) >= $3)
+        AND ${membershipProductCode.replaceAll("payload", "current.payload")} <> 'cdd1'
+        AND ${membershipProductCode.replaceAll("payload", "current.payload")} !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
+        AND NOT (current.club='ruzafa' AND current.external_uid ~ '13938926$')
+        AND NOT (current.club='nuevo-centro' AND current.external_uid ~ '13941153$')
+        AND (current.external_uid ~ '(13939282|13934373)$' OR NOT EXISTS (
+          SELECT 1 FROM mapped previous
+          WHERE previous.entity='abonnements'
+            AND previous.club=current.club
+            AND previous.contact_uid=current.contact_uid
+            AND previous.external_uid<>current.external_uid
+            AND previous.source_deleted_at IS NULL
+            AND nullif(left(coalesce(previous.payload->>'startedAt',previous.payload->>'validFrom',previous.payload->>'createdAt',''),10),'')::date
+              < nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date
+            AND coalesce(
+              nullif(left(coalesce(previous.payload->>'terminatedAt',previous.payload->>'validThrough',previous.payload->>'endedAt',''),10),'')::date,
+              '9999-12-31'::date
+            ) >= nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date - 2
+        ))
+      ORDER BY current.club,coalesce(current.contact_uid,current.external_uid),
+        coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt','') DESC
     ), tariff_rows AS (
       SELECT club,tariff,count(*)::int memberships
       FROM tariff_contacts GROUP BY club,tariff
