@@ -594,7 +594,7 @@ async function loadLiveBusinessRows(force = false) {
       WHERE current.entity='abonnements' AND current.source_deleted_at IS NULL
         AND left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),7)=$1
         AND (current.club NOT IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa')
-          OR left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10) >= $3)
+          OR nullif(left(coalesce(current.payload->>'startedAt',current.payload->>'validFrom',current.payload->>'createdAt',''),10),'')::date >= $3::date)
         AND ${membershipProductCode.replaceAll("payload", "current.payload")} <> 'cdd1'
         AND ${membershipProductCode.replaceAll("payload", "current.payload")} !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
         AND NOT (current.club='ruzafa' AND current.external_uid ~ '13938926$')
