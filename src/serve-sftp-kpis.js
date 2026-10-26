@@ -575,25 +575,12 @@ async function loadLiveBusinessRows(force = false) {
       FROM cancellation_daily_rows GROUP BY club
     ), totals AS (
       SELECT club,
-        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
-          FILTER (WHERE entity='paiements' AND payload->>'createdAt' LIKE $1 || '%'
-            AND coalesce(payload->>'canceledAt','')=''
-            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected,
-        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
-          FILTER (WHERE entity='paiements' AND payload->>'createdAt' LIKE $1 || '%'
-            AND left(payload->>'createdAt',10) > CASE WHEN club IN ('barcelona','malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
-            AND coalesce(payload->>'canceledAt','')=''
-            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected_increment,
-        coalesce(sum(coalesce(nullif(payload->>'amount','')::numeric,0) / 121)
-          FILTER (WHERE entity='paiements' AND left(payload->>'createdAt',10)=$2
-            AND coalesce(payload->>'canceledAt','')=''
-            AND lower(coalesce(payload->>'incidentState','none')) IN ('none','closed')),0) billing_collected_today,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
-          FILTER (WHERE entity='factures' AND payload->>'invoice.generatedAt' LIKE $1 || '%'
-            AND left(payload->>'invoice.generatedAt',10) > CASE WHEN club IN ('barcelona','malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
-            AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_increment,
+          FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%'
+            AND ${invoiceState} AND ${paidInvoiceCondition}),0) billing_paid_invoices,
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
-          FILTER (WHERE entity='factures' AND left(payload->>'invoice.generatedAt',10)=$2 AND lower(coalesce(payload->>'invoice.state','completed'))='completed' AND ${paidInvoiceCondition}),0) billing_today,
+          FILTER (WHERE entity='factures' AND left(${invoiceDate},10)=$2
+            AND ${invoiceState} AND ${paidInvoiceCondition}),0) billing_paid_invoices_today,
         coalesce(sum((${taxInclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState}
             AND ${paidInvoiceCondition} AND ${productCode}='merch'),0) merch,
@@ -729,9 +716,6 @@ async function withLiveBusiness(snapshots) {
     // Preserve the last complete persisted row while the live rollup warms.
     // Never replace it with a partial cut-over baseline.
     if (!row) return snapshot;
-    const billingBaseline = baseline?.businessThrough
-      ? { through: baseline.businessThrough, billing: baseline.billing }
-      : billingCutoverBaselines[month]?.[snapshot.club_code];
     const memberships = number(snapshot.metrics?.monthToDate?.memberships);
     const tariffCounts = new Map();
     for (const item of [...(baseline?.tariffs ?? []), ...(Array.isArray(row.membership_tariffs) ? row.membership_tariffs : [])]) {
@@ -743,9 +727,7 @@ async function withLiveBusiness(snapshots) {
     const classified = tariffs.reduce((sum, item) => sum + number(item.memberships), 0);
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     if (!baseline?.businessThrough) {
-      const billing = Math.round((billingBaseline
-        ? number(billingBaseline.billing) + number(row.billing_collected_increment)
-        : number(row.billing_collected)) * 100) / 100;
+      const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
       return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
@@ -754,10 +736,10 @@ async function withLiveBusiness(snapshots) {
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
         merchBasis: "facturas-cobradas-sftp-con-iva",
         dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
-        billingBasis: billingBaseline ? "cierre-validado-mas-cobros-sftp" : "cobros-efectivos-sftp-sin-iva",
-        billingBaselineThrough: billingBaseline?.through ?? null,
+        billingBasis: "facturas-cobradas-sftp-sin-iva",
+        billingBaselineThrough: null,
         tariffClassificationBasis: "resamania-sftp-normalizado" },
-      today: { ...snapshot.metrics?.today, revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
+      today: { ...snapshot.metrics?.today, revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
           taxBasis: "Cobros efectivos SFTP sin IVA; anulados e incidencias abiertas excluidos", collectedThrough: madridDate() } },
@@ -765,7 +747,7 @@ async function withLiveBusiness(snapshots) {
     } };
     }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
-    const billing = Math.round((number(baseline.billing) + number(row.billing_collected_increment)) * 100) / 100;
+    const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
     const activeMembers = number(baseline.members)
       + (memberships - number(baseline.memberships))
       - (cancellations - number(baseline.cancellations));
@@ -780,9 +762,9 @@ async function withLiveBusiness(snapshots) {
       rate: baseline.members ? cancellations / baseline.members * 100 : 0, averageAccesses: cancellationAverageAccesses,
     }];
     return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
-      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_collected_today), billing: number(row.billing_collected_today) },
+      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
-        billingBasis: "cierre-validado-mas-cobros-sftp", billingBaselineThrough: baseline.businessThrough,
+        billingBasis: "facturas-cobradas-sftp-sin-iva", billingBaselineThrough: null,
         merch: Math.round((number(baseline.merchOpening) + number(row.merch)) * 100) / 100,
         supplements: number(row.supplements),
         dayPasses: number(baseline.dayPassOpening) + number(row.day_passes),
