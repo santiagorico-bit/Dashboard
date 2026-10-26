@@ -748,7 +748,8 @@ async function withLiveBusiness(snapshots) {
         : number(row.billing_collected)) * 100) / 100;
       return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
       monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
-        dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes), membershipTariffs: tariffs,
+        dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
+        formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra", membershipTariffs: tariffs,
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
         merchBasis: "facturas-cobradas-sftp-con-iva",
@@ -789,7 +790,9 @@ async function withLiveBusiness(snapshots) {
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
-        formulaChanges: number(baseline.formulaChanges) + number(row.formula_changes_increment),
+        formulaChanges: baseline.formulaChanges == null
+          ? number(row.formula_changes)
+          : number(baseline.formulaChanges) + number(row.formula_changes_increment),
         formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra",
         membershipTariffs: tariffs, tariffClassificationBasis: "cierre-resamania-reconciliado-con-incrementales-sftp", churnHistory: historicChurn(snapshot.club_code) },
       incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations, accessesMonth: accesses, uniqueVisitorsMonth: uniqueVisitors },
