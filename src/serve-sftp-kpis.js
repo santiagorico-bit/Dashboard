@@ -175,8 +175,8 @@ async function aggregate() {
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
         AND lower(coalesce(payload->>'state',payload->>'status',payload->>'membership.state','active')) !~ '(cancel|canceled|cancelled|resili|termin|ended|expired|inact)'
         AND coalesce(payload->>'startedAt',payload->>'validFrom',payload->>'startAt',payload->>'startDate',payload->>'effectiveFrom',payload->>'createdAt','') <= $2
-        AND (coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') = ''
-          OR coalesce(payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminatedAt',payload->>'terminationDate','') >= $2)
+        AND (coalesce(payload->>'terminatedAt',payload->>'validThrough',payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminationDate','') = ''
+          OR left(coalesce(payload->>'terminatedAt',payload->>'validThrough',payload->>'endedAt',payload->>'validUntil',payload->>'endAt',payload->>'endDate',payload->>'terminationDate',''),10) >= $2)
       GROUP BY club
     ), post_cutover AS (
       SELECT club,
@@ -436,6 +436,21 @@ async function loadLiveMembershipRows(force = false) {
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$2::date) today,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$3::date) yesterday,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
+    (SELECT count(DISTINCT coalesce(active.contact_uid,active.external_uid))
+      FROM membership_candidates active
+      WHERE active.club=m.club
+        AND active.started_date <= $2::date
+        AND coalesce(
+          nullif(left(active.payload->>'terminatedAt',10),''),
+          nullif(left(active.payload->>'validThrough',10),''),
+          nullif(left(active.payload->>'endedAt',10),''),
+          nullif(left(active.payload->>'validUntil',10),''),
+          nullif(left(active.payload->>'endAt',10),''),
+          nullif(left(active.payload->>'endDate',10),''),
+          nullif(left(active.payload->>'terminationDate',10),''),
+          '9999-12-31'
+        ) >= $2
+    ) active_members,
     0::int baseline_free_weekly
     FROM memberships m GROUP BY club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
@@ -474,11 +489,12 @@ async function withLiveMemberships(snapshots) {
       ...snapshot.metrics,
       today: { ...snapshot.metrics?.today, memberships: number(row.today) },
       yesterday: { ...snapshot.metrics?.yesterday, memberships: auditedYesterday?.memberships ?? (isBaselineYesterday ? number(baseline.membershipsYesterday) : number(row.yesterday)) },
-      monthToDate: { ...snapshot.metrics?.monthToDate, memberships,
+      monthToDate: { ...snapshot.metrics?.monthToDate, memberships, members: number(row.active_members),
         sftpMembershipStarts: number(row.membership_starts),
         sftpExcludedFreeWeekly: number(row.baseline_free_weekly),
         membershipCountRule: "Fitness KPI close through prior day + SFTP valid starts after close; formula changes and one-week passes excluded",
-        memberCountBasis: baseline ? "fitness-kpi-close-plus-sftp-incremental" : "resamania-sftp",
+        memberCountBasis: "resamania-sftp-active-memberships",
+        memberCountAsOf: today,
         membershipBaselineThrough: baseline?.businessThrough ?? null },
     } };
   });
@@ -755,9 +771,12 @@ async function withLiveBusiness(snapshots) {
     }
     const cancellations = baseline.cancellations + number(row.cancellations_increment);
     const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
-    const activeMembers = number(baseline.members)
-      + (memberships - number(baseline.memberships))
-      - (cancellations - number(baseline.cancellations));
+    // Active members are a stock, not a movement reconstruction. Rebuilding
+    // them as prior close + signups - cancellations drifts whenever a freeze,
+    // expiry, delayed cancellation or reactivation changes membership state.
+    // The live membership rollup already counts the distinct contacts whose
+    // SFTP subscription is valid today, so keep that value authoritative.
+    const activeMembers = number(snapshot.metrics?.monthToDate?.members);
     const accessRow = liveAccess.get(snapshot.club_code);
     const accesses = accessRow
       ? number(baseline.accesses) + number(accessRow.accesses_increment)
