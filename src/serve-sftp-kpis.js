@@ -405,6 +405,21 @@ async function loadLiveMembershipRows(force = false) {
         -- Fitness KPI excludes this Ruzafa VIP three-month subscription even
         -- though its generic SFTP product code is cdd4.
         AND NOT (m.club='ruzafa' AND m.external_uid ~ '13938926$')
+    ), active_members AS MATERIALIZED (
+      SELECT club,count(DISTINCT coalesce(contact_uid,external_uid)) active_members
+      FROM membership_candidates
+      WHERE started_date <= $2::date
+        AND coalesce(
+          nullif(left(payload->>'terminatedAt',10),''),
+          nullif(left(payload->>'validThrough',10),''),
+          nullif(left(payload->>'endedAt',10),''),
+          nullif(left(payload->>'validUntil',10),''),
+          nullif(left(payload->>'endAt',10),''),
+          nullif(left(payload->>'endDate',10),''),
+          nullif(left(payload->>'terminationDate',10),''),
+          '9999-12-31'
+        ) >= $2::text
+      GROUP BY club
     ), formula_changes AS (
       SELECT DISTINCT current.external_uid
       FROM membership_candidates current
@@ -436,23 +451,10 @@ async function loadLiveMembershipRows(force = false) {
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$2::date) today,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date=$3::date) yesterday,
     count(DISTINCT coalesce(contact_uid,external_uid)) FILTER (WHERE started_date >= $4::date AND started_date <= $2::date) membership_starts,
-    (SELECT count(DISTINCT coalesce(active.contact_uid,active.external_uid))
-      FROM membership_candidates active
-      WHERE active.club=m.club
-        AND active.started_date <= $2::date
-        AND coalesce(
-          nullif(left(active.payload->>'terminatedAt',10),''),
-          nullif(left(active.payload->>'validThrough',10),''),
-          nullif(left(active.payload->>'endedAt',10),''),
-          nullif(left(active.payload->>'validUntil',10),''),
-          nullif(left(active.payload->>'endAt',10),''),
-          nullif(left(active.payload->>'endDate',10),''),
-          nullif(left(active.payload->>'terminationDate',10),''),
-          '9999-12-31'
-        ) >= $2::text
-    ) active_members,
+    max(active.active_members) active_members,
     0::int baseline_free_weekly
-    FROM memberships m GROUP BY club`, [month, today, yesterday, membershipFrom]);
+    FROM memberships m LEFT JOIN active_members active USING(club)
+    GROUP BY m.club`, [month, today, yesterday, membershipFrom]);
     assertCompleteClubRows(rows, "Altas SFTP");
     liveMembershipCache = { at: Date.now(), rows };
     return rows;
