@@ -449,7 +449,7 @@ async function loadLiveMembershipRows(force = false) {
           nullif(left(active.payload->>'endDate',10),''),
           nullif(left(active.payload->>'terminationDate',10),''),
           '9999-12-31'
-        ) >= $2
+        ) >= $2::text
     ) active_members,
     0::int baseline_free_weekly
     FROM memberships m GROUP BY club`, [month, today, yesterday, membershipFrom]);
