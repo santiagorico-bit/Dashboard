@@ -599,6 +599,10 @@ async function loadLiveBusinessRows(force = false) {
             AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
+            AND left(payload->>'cancellationDate',10) <= $2
+            AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
+        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+          FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE WHEN club IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
             AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_increment,
         count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
@@ -753,8 +757,10 @@ async function withLiveBusiness(snapshots) {
     if (classified < memberships) tariffs.push({ tariff: "Sin cuota clasificada", memberships: memberships - classified });
     if (!baseline?.businessThrough) {
       const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
+      const cancellations = number(row.cancellations_month);
       return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
-      monthToDate: { ...snapshot.metrics?.monthToDate, billing, merch: number(row.merch), supplements: number(row.supplements),
+      monthToDate: { ...snapshot.metrics?.monthToDate, cancellations, activeNet: memberships - cancellations,
+        billing, merch: number(row.merch), supplements: number(row.supplements),
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
         formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra", membershipTariffs: tariffs,
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
@@ -764,7 +770,9 @@ async function withLiveBusiness(snapshots) {
         billingBasis: "facturas-cobradas-sftp-sin-iva",
         billingBaselineThrough: null,
         tariffClassificationBasis: "resamania-sftp-normalizado" },
-      today: { ...snapshot.metrics?.today, revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
+      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today),
+        revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
+      incidences: { ...snapshot.metrics?.incidences, pendingCancellationsThisMonth: cancellations },
       commercial: { ...snapshot.metrics?.commercial,
         ticket: { ...snapshot.metrics?.commercial?.ticket, billing, billingTaxExcluded: billing,
           taxBasis: "Cobros efectivos SFTP sin IVA; anulados e incidencias abiertas excluidos", collectedThrough: madridDate() } },
