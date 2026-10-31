@@ -804,6 +804,7 @@ async function withLiveBusiness(snapshots) {
     const cancellations = auditedClose
       ? number(auditedClose.total)
       : number(baseline.cancellations) + number(row.cancellations_increment);
+    const auditedToday = auditedClose?.byDay?.find((item) => item.date === madridDate())?.count;
     const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
     // Active members are a stock, not a movement reconstruction. Rebuilding
     // them as prior close + signups - cancellations drifts whenever a freeze,
@@ -822,7 +823,7 @@ async function withLiveBusiness(snapshots) {
       rate: baseline.members ? cancellations / baseline.members * 100 : 0, averageAccesses: cancellationAverageAccesses,
     }];
     return { ...snapshot, snapshot_date: madridDate(), collected_at: new Date().toISOString(), metrics: { ...snapshot.metrics,
-      today: { ...snapshot.metrics?.today, cancellations: number(row.cancellations_today), revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
+      today: { ...snapshot.metrics?.today, cancellations: auditedToday == null ? number(row.cancellations_today) : number(auditedToday), revenue: number(row.billing_paid_invoices_today), billing: number(row.billing_paid_invoices_today) },
       monthToDate: { ...snapshot.metrics?.monthToDate, members: activeMembers, cancellations, activeNet: memberships - cancellations, billing,
         billingBasis: "facturas-cobradas-sftp-sin-iva", billingBaselineThrough: null,
         merch: Math.round((number(baseline.merchOpening) + number(row.merch)) * 100) / 100,
