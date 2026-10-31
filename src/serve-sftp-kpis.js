@@ -112,6 +112,22 @@ const cutoverBaselines = {
   },
 };
 
+// Month-end reconciliations are aggregate-only (no member PII). They are used
+// only when the complete Resamania cancellation export has been audited. This
+// prevents a partially backfilled SFTP history from replacing a validated
+// close. Criteria: accepted, effective in the month, excluding formula changes
+// and transfers.
+const auditedCancellationCloses = {
+  "2026-10": {
+    ruzafa: {
+      total: 351,
+      source: "resamania-cancellations-export-2026-10-31",
+      byDay: [16,17,8,1,10,5,19,30,8,7,3,21,16,7,15,7,5,3,17,9,10,14,11,6,3,12,15,15,17,16,8]
+        .map((count, index) => ({ date: `2026-10-${String(index + 1).padStart(2, "0")}`, count })),
+    },
+  },
+};
+
 const billingCutoverBaselines = {
   "2026-10": {
     barcelona: { through: "2026-10-12", billing: 19805.06 },
@@ -784,7 +800,10 @@ async function withLiveBusiness(snapshots) {
       googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
     }
-    const cancellations = number(row.cancellations_month);
+    const auditedClose = auditedCancellationCloses[month]?.[snapshot.club_code];
+    const cancellations = auditedClose
+      ? number(auditedClose.total)
+      : number(baseline.cancellations) + number(row.cancellations_increment);
     const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
     // Active members are a stock, not a movement reconstruction. Rebuilding
     // them as prior close + signups - cancellations drifts whenever a freeze,
@@ -811,8 +830,9 @@ async function withLiveBusiness(snapshots) {
         dayPasses: number(baseline.dayPassOpening) + number(row.day_passes),
         merchBasis: baseline.merchOpening == null ? "facturas-cobradas-sftp-con-iva" : "historico-resamania-mas-facturas-cobradas-sftp-con-iva",
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
-        cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
+        cancellationsByDay: auditedClose?.byDay ?? (Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : []),
         cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp-sin-cambios-de-formula-ni-traspasos",
+        cancellationCloseSource: auditedClose?.source ?? "cierre-validado-mas-incrementales-sftp",
         formulaChanges: baseline.formulaChanges == null
           ? number(row.formula_changes)
           : number(baseline.formulaChanges) + number(row.formula_changes_increment),
