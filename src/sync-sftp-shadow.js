@@ -20,6 +20,8 @@ const maxFiles = Math.max(1, Math.min(100, Number(process.env.RESAMANIA_SFTP_MAX
 const includeInitialExports = process.env.RESAMANIA_SFTP_INCLUDE_INIT === "true";
 const initialExportEntities = new Set((process.env.RESAMANIA_SFTP_INIT_ENTITIES || "")
   .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
+const requestedEntities = new Set((process.env.RESAMANIA_SFTP_ENTITIES || "")
+  .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const maxAgeHours = Math.max(0, Number(process.env.RESAMANIA_SFTP_MAX_AGE_HOURS || 0));
 const chunkSize = 400;
 const initialExportSchemaVersion = "3";
@@ -97,6 +99,7 @@ try {
   // the hourly job can consume the timeout before live KPIs are published.
   const listed = (await sftp.list(remoteRoot))
     .filter(isCsvFile)
+    .filter((item) => !requestedEntities.size || requestedEntities.has(entityFromFilename(item.name)))
     .filter((item) => {
       const isInitial = isInitialExport(item.name);
       return !isInitial || includeInitialExports || initialExportEntities.has(entityFromFilename(item.name));
