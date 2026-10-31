@@ -201,8 +201,8 @@ async function aggregate() {
         AND lower(coalesce(payload->>'product.code',payload->>'productCode',payload->>'initialInfo.productCode','')) !~ '(day|jour|dia|week|semaine|semana|sesion|session|vip|admin)'
       GROUP BY club
     ), cancellations AS (
-      SELECT club, count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid')) FILTER (WHERE payload->>'cancellationDate' LIKE $2 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today,
+      SELECT club, count(DISTINCT external_uid) FILTER (WHERE payload->>'cancellationDate' LIKE $1 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted' AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)') cancellations_month,
+        count(DISTINCT external_uid) FILTER (WHERE payload->>'cancellationDate' LIKE $2 || '%' AND lower(coalesce(payload->>'state','accepted'))='accepted' AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)') cancellations_today,
         max(coalesce(source_updated_at,ingested_at)) source_updated_at, max(ingested_at) ingested_at
       FROM mapped WHERE entity='resiliations' AND source_deleted_at IS NULL GROUP BY club
     ), invoices AS (
@@ -573,11 +573,12 @@ async function loadLiveBusinessRows(force = false) {
       GROUP BY club
     ), cancellation_daily_rows AS (
       SELECT club,left(payload->>'cancellationDate',10) cancellation_date,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))::int cancellations
+        count(DISTINCT external_uid)::int cancellations
       FROM mapped
       WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
         AND left(payload->>'cancellationDate',10) <= $2
         AND lower(coalesce(payload->>'state','accepted'))='accepted'
+        AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)'
       GROUP BY club,left(payload->>'cancellationDate',10)
     ), cancellation_daily AS (
       SELECT club,jsonb_agg(jsonb_build_object('date',cancellation_date,'count',cancellations)
@@ -597,16 +598,20 @@ async function loadLiveBusinessRows(force = false) {
         coalesce(sum((${taxExclusiveLinePrice} * coalesce(nullif(payload->>'quantity','')::numeric,1))/100)
           FILTER (WHERE entity='factures' AND ${invoiceDate} LIKE $1 || '%' AND ${invoiceState} AND ${paidInvoiceCondition}
             AND (${productCode} IN ('prot','supp','nutrition') OR ${productName}~'(protein|prote[ií]na|creatina|pre.?workout|pre.?entreno|bcaa|col[aá]geno|magnesio|vitamina|barrita|shot|whey|peanut|rice flour)')),0) supplements,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+        count(DISTINCT external_uid)
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) <= $2
-            AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_month,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
+            AND lower(coalesce(payload->>'state','accepted'))='accepted'
+            AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)') cancellations_month,
+        count(DISTINCT external_uid)
           FILTER (WHERE entity='resiliations' AND payload->>'cancellationDate' LIKE $1 || '%'
             AND left(payload->>'cancellationDate',10) > CASE WHEN club IN ('malaga-armengual','madrid','les-arts','nuevo-centro','ruzafa') THEN '2026-10-12' ELSE '2026-10-05' END
-            AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_increment,
-        count(DISTINCT coalesce(payload->>'membership.uid',payload->>'uid',external_uid))
-          FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2 AND lower(coalesce(payload->>'state','accepted'))='accepted') cancellations_today
+            AND lower(coalesce(payload->>'state','accepted'))='accepted'
+            AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)') cancellations_increment,
+        count(DISTINCT external_uid)
+          FILTER (WHERE entity='resiliations' AND left(payload->>'cancellationDate',10)=$2
+            AND lower(coalesce(payload->>'state','accepted'))='accepted'
+            AND lower(coalesce(payload->>'reason.name','')) !~ '(cambio de f[oó]rmula|transfer)') cancellations_today
       FROM mapped GROUP BY club
     ), tariff_contacts AS (
       SELECT DISTINCT ON (current.club,coalesce(current.contact_uid,current.external_uid))
@@ -764,7 +769,7 @@ async function withLiveBusiness(snapshots) {
         dayPasses: number(row.day_passes), formulaChanges: number(row.formula_changes),
         formulaChangeBasis: "resamania-sftp-essential-a-original-o-ultra", membershipTariffs: tariffs,
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
-        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
+        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp-sin-cambios-de-formula-ni-traspasos",
         merchBasis: "facturas-cobradas-sftp-con-iva",
         dayPassBasis: "facturas-cobradas-sftp-sin-gesto-comercial",
         billingBasis: "facturas-cobradas-sftp-sin-iva",
@@ -779,7 +784,7 @@ async function withLiveBusiness(snapshots) {
       googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
     }
-    const cancellations = baseline.cancellations + number(row.cancellations_increment);
+    const cancellations = number(row.cancellations_month);
     const billing = Math.round(number(row.billing_paid_invoices) * 100) / 100;
     // Active members are a stock, not a movement reconstruction. Rebuilding
     // them as prior close + signups - cancellations drifts whenever a freeze,
@@ -807,7 +812,7 @@ async function withLiveBusiness(snapshots) {
         merchBasis: baseline.merchOpening == null ? "facturas-cobradas-sftp-con-iva" : "historico-resamania-mas-facturas-cobradas-sftp-con-iva",
         dayPassBasis: baseline.dayPassOpening == null ? "facturas-cobradas-sftp-sin-gesto-comercial" : "historico-resamania-mas-facturas-cobradas-sftp-sin-gesto-comercial",
         cancellationsByDay: Array.isArray(row.cancellations_by_day) ? row.cancellations_by_day : [],
-        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp",
+        cancellationDailyBasis: "bajas-aceptadas-por-fecha-efectiva-sftp-sin-cambios-de-formula-ni-traspasos",
         formulaChanges: baseline.formulaChanges == null
           ? number(row.formula_changes)
           : number(baseline.formulaChanges) + number(row.formula_changes_increment),
@@ -819,7 +824,7 @@ async function withLiveBusiness(snapshots) {
           taxBasis: "Cobros efectivos SFTP sin IVA; anulados e incidencias abiertas excluidos", collectedThrough: madridDate() } },
       retention: {
         active: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { from: `${month}-01`, to: madridDate(), mode: "current-month-hourly-sftp" }, criterion: "Socios activos y accesos autorizados recibidos por SFTP de Resamania", total: activeMembers, headlineMetric: { label: "Frecuencia media del mes", value: activeMembers ? accesses / activeMembers : 0 }, segments: [{ key: "active-base-current-month", label: "Base activa · mes en curso", members: activeMembers, averageAccesses: activeMembers ? accesses / activeMembers : 0, engagedMembers: uniqueVisitors, engagedPercentage: activeMembers ? uniqueVisitors / activeMembers * 100 : 0, zeroAccessMembers: Math.max(0, activeMembers - uniqueVisitors) }] },
-        cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas efectivas mensuales recibidas por Resamania; histórico validado y mes actual incremental SFTP", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
+        cancellations: { generatedAt: new Date().toISOString(), asOf: madridDate(), period: { mode: "monthly_history", from: cancellationSeries[0]?.month ?? month, to: month }, criterion: "Bajas aceptadas por fecha efectiva SFTP, excluyendo cambios de fórmula y traspasos", total: cancellationSeries.reduce((sum,item) => sum + number(item.cancellations), 0), headlineMetric: { label: `Churn ${month}`, value: baseline.members ? cancellations / baseline.members * 100 : 0, suffix: "%" }, segments: cancellationSeries.map((item) => ({ key: item.month, label: item.month, cancellations: item.cancellations, percentage: item.rate, averageAccesses: item.averageAccesses ?? null })) },
       },
       googleReviews: googleReviewsCache.get(snapshot.club_code) ?? snapshot.metrics?.googleReviews ?? null,
     } };
